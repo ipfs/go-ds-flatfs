@@ -151,7 +151,7 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 		return err
 	}
 	if fs.sync {
-		if err := tmp.Sync(); err != nil {
+		if err := syncFile(tmp); err != nil {
 			return err
 		}
 	}
@@ -220,7 +220,7 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 	// sync and close files
 	for fi, _ := range files {
 		if fs.sync {
-			if err := fi.Sync(); err != nil {
+			if err := syncFile(fi); err != nil {
 				return err
 			}
 		}
