@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/flatfs"
 	"github.com/ipfs/go-datastore/query"
 	dstest "github.com/ipfs/go-datastore/test"
+	"github.com/ipfs/go-ds-flatfs"
 
 	rand "github.com/dustin/randbo"
 )
