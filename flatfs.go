@@ -312,37 +312,60 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 	reschan := make(chan query.Result, query.KeysOnlyBufSize)
 	go func() {
 		defer close(reschan)
-		err := filepath.Walk(fs.path, func(path string, info os.FileInfo, err error) error {
-			if os.IsNotExist(err) {
-				return nil
-			}
-			if err != nil {
-				log.Errorf("Walk func in Query got error: %v", err)
-				return err
-			}
-
-			if !info.Mode().IsRegular() || strings.HasPrefix(info.Name(), ".") {
-				return nil
-			}
-
-			key, ok := fs.decode(info.Name())
-			if !ok {
-				log.Warning("failed to decode entry in flatfs")
-				return nil
-			}
-
-			reschan <- query.Result{
-				Entry: query.Entry{
-					Key: key.String(),
-				},
-			}
-			return nil
-		})
+		err := fs.walkTopLevel(fs.path, reschan)
 		if err != nil {
 			log.Warning("walk failed: ", err)
 		}
 	}()
 	return query.ResultsWithChan(q, reschan), nil
+}
+
+func (fs *Datastore) walkTopLevel(path string, reschan chan query.Result) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, dir := range names {
+		err = fs.walk(filepath.Join(path, dir), reschan)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (fs *Datastore) walk(path string, reschan chan query.Result) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, fn := range names {
+
+		if len(fn) == 0 || fn[0] == '.' {
+			continue
+		}
+
+		key, ok := fs.decode(fn)
+		if !ok {
+			log.Warning("failed to decode entry in flatfs")
+			continue
+		}
+
+		reschan <- query.Result{
+			Entry: query.Entry{
+				Key: key.String(),
+			},
+		}
+	}
+	return nil
 }
 
 func (fs *Datastore) Close() error {
