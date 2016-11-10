@@ -12,11 +12,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/query"
-	"github.com/jbenet/go-os-rename"
+	"gx/ipfs/QmaeRR9SpXumU5tYLRkq6x6pfMe8qKzxn4ujBpsTJ2zQG7/go-os-rename"
+	"gx/ipfs/QmbzuUusHqaLLoNTDEVLcSF6vZDHZDLPC7p4bztRvvkXxU/go-datastore"
+	"gx/ipfs/QmbzuUusHqaLLoNTDEVLcSF6vZDHZDLPC7p4bztRvvkXxU/go-datastore/query"
 
-	logging "github.com/ipfs/go-log"
+	logging "gx/ipfs/QmSpJByNKFX1sCsHBEp3R73FL4NF6FnQTEGyNAXHm2GS52/go-log"
 )
 
 var log = logging.Logger("flatfs")
@@ -343,6 +343,77 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 		}
 	}()
 	return query.ResultsWithChan(q, reschan), nil
+}
+
+func (fs *Datastore) QueryOpt(q query.Query) (query.Results, error) {
+	if (q.Prefix != "" && q.Prefix != "/") ||
+		len(q.Filters) > 0 ||
+		len(q.Orders) > 0 ||
+		q.Limit > 0 ||
+		q.Offset > 0 ||
+		!q.KeysOnly {
+		// TODO this is overly simplistic, but the only caller is
+		// `ipfs refs local` for now, and this gets us moving.
+		return nil, errors.New("flatfs only supports listing all keys in random order")
+	}
+
+	reschan := make(chan query.Result, query.KeysOnlyBufSize)
+	go func() {
+		defer close(reschan)
+		err := fs.walkTopLevel(fs.path, reschan)
+		if err != nil {
+			log.Warning("walk failed: ", err)
+		}
+	}()
+	return query.ResultsWithChan(q, reschan), nil
+}
+
+func (fs *Datastore) walkTopLevel(path string, reschan chan query.Result) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, dir := range names {
+		err = fs.walk(filepath.Join(path, dir), reschan)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (fs *Datastore) walk(path string, reschan chan query.Result) error {
+	dir, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	names, err := dir.Readdirnames(-1)
+	if err != nil {
+		return err
+	}
+	for _, fn := range names {
+
+		if len(fn) == 0 || fn[0] == '.' {
+			continue
+		}
+
+		key, ok := fs.decode(fn)
+		if !ok {
+			log.Warning("failed to decode entry in flatfs")
+			continue
+		}
+
+		reschan <- query.Result{
+			Entry: query.Entry{
+				Key: key.String(),
+			},
+		}
+	}
+	return nil
 }
 
 func (fs *Datastore) Close() error {

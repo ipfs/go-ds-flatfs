@@ -8,10 +8,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-datastore/flatfs"
-	"github.com/ipfs/go-datastore/query"
-	dstest "github.com/ipfs/go-datastore/test"
+	"gx/ipfs/QmbzuUusHqaLLoNTDEVLcSF6vZDHZDLPC7p4bztRvvkXxU/go-datastore"
+	"gx/ipfs/QmbzuUusHqaLLoNTDEVLcSF6vZDHZDLPC7p4bztRvvkXxU/go-datastore/flatfs"
+	"gx/ipfs/QmbzuUusHqaLLoNTDEVLcSF6vZDHZDLPC7p4bztRvvkXxU/go-datastore/query"
+	dstest "gx/ipfs/QmbzuUusHqaLLoNTDEVLcSF6vZDHZDLPC7p4bztRvvkXxU/go-datastore/test"
 
 	rand "github.com/dustin/randbo"
 )
