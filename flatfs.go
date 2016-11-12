@@ -325,15 +325,22 @@ func (fs *Datastore) walkTopLevel(path string, reschan chan query.Result) error 
 	if err != nil {
 		return err
 	}
+	defer dir.Close()
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
 		return err
 	}
 	for _, dir := range names {
+
+		if len(dir) == 0 || dir[0] == '.' {
+			continue
+		}
+
 		err = fs.walk(filepath.Join(path, dir), reschan)
 		if err != nil {
 			return err
 		}
+
 	}
 	return nil
 }
@@ -343,6 +350,7 @@ func (fs *Datastore) walk(path string, reschan chan query.Result) error {
 	if err != nil {
 		return err
 	}
+	defer dir.Close()
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
 		return err
