@@ -20,14 +20,16 @@
     },
     {
       "author": "jbenet",
-      "hash": "QmbzuUusHqaLLoNTDEVLcSF6vZDHZDLPC7p4bztRvvkXxU",
+      "hash": "QmfBmdzssuoW5qFS3EdhoV66H33LAqwg2a4gNBX6HUhHpp",
       "name": "go-datastore",
-      "version": "1.0.0"
+      "version": "1.2.0"
     }
   ],
   "gxVersion": "0.8.0",
   "language": "go",
   "license": "",
   "name": "go-ds-flatfs",
-  "version": "1.0.0"
+  "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
+  "version": "1.1.0"
 }
+
