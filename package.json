@@ -20,9 +20,9 @@
     },
     {
       "author": "jbenet",
-      "hash": "QmbzuUusHqaLLoNTDEVLcSF6vZDHZDLPC7p4bztRvvkXxU",
+      "hash": "QmRWDav6mzWseLWeYfVd5fvUKiVe9xNH29YfMF438fG364",
       "name": "go-datastore",
-      "version": "1.0.0"
+      "version": "1.2.0"
     }
   ],
   "gxVersion": "0.8.0",
@@ -31,3 +31,4 @@
   "name": "go-ds-flatfs",
   "version": "1.0.0"
 }
+
