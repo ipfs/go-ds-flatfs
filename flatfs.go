@@ -357,6 +357,16 @@ func (fs *Datastore) walk(path string, reschan chan query.Result) error {
 		return err
 	}
 	defer dir.Close()
+
+	// ignore non-directories
+	fileInfo, err := dir.Stat()
+	if err != nil {
+		return err
+	}
+	if !fileInfo.IsDir() {
+		return nil
+	}
+
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
 		return err
