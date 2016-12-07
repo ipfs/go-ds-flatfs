@@ -320,7 +320,7 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 		defer close(reschan)
 		err := fs.walkTopLevel(fs.path, reschan)
 		if err != nil {
-			log.Warning("walk failed: ", err)
+			reschan <- query.Result{Error: errors.New("walk failed: " + err.Error())}
 		}
 	}()
 	return query.ResultsWithChan(q, reschan), nil
