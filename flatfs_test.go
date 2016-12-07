@@ -343,6 +343,11 @@ func testQuerySimple(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
+	err := ioutil.WriteFile(filepath.Join(temp, "README"), []byte("something"), 0666)
+	if err != nil {
+		t.Fatalf("WriteFile fail: %v\n", err)
+	}
+
 	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
