@@ -30,23 +30,11 @@ func tempdir(t testing.TB) (path string, cleanup func()) {
 	return path, cleanup
 }
 
-func TestBadPrefixLen(t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
-
-	for i := 0; i > -3; i-- {
-		_, err := flatfs.New(temp, i, false)
-		if g, e := err, flatfs.ErrBadPrefixLen; g != e {
-			t.Errorf("expected ErrBadPrefixLen, got: %v", g)
-		}
-	}
-}
-
 func TestPutBadValueType(t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, flatfs.Prefix(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -57,11 +45,13 @@ func TestPutBadValueType(t *testing.T) {
 	}
 }
 
-func TestPut(t *testing.T) {
+type mkShardFunc func(int) flatfs.ShardFunc
+
+func testPut(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -72,11 +62,16 @@ func TestPut(t *testing.T) {
 	}
 }
 
-func TestGet(t *testing.T) {
+func TestPut(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) { testPut(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testPut(flatfs.Prefix, t) })
+}
+
+func testGet(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -100,11 +95,16 @@ func TestGet(t *testing.T) {
 	}
 }
 
-func TestPutOverwrite(t *testing.T) {
+func TestGet(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) { testGet(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testGet(flatfs.Prefix, t) })
+}
+
+func testPutOverwrite(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -132,11 +132,16 @@ func TestPutOverwrite(t *testing.T) {
 	}
 }
 
-func TestGetNotFoundError(t *testing.T) {
+func TestPutOverwrite(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) { testPutOverwrite(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testPutOverwrite(flatfs.Prefix, t) })
+}
+
+func testGetNotFoundError(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -147,19 +152,29 @@ func TestGetNotFoundError(t *testing.T) {
 	}
 }
 
-func TestStorage(t *testing.T) {
+func TestGetNotFoundError(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) { testGetNotFoundError(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testGetNotFoundError(flatfs.Prefix, t) })
+}
+
+type params struct {
+	what    string
+	dir     string
+	key     string
+	dirFunc mkShardFunc
+}
+
+func testStorage(p *params, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	const prefixLen = 2
-	const prefix = "qu"
-	const target = prefix + string(os.PathSeparator) + "quux.data"
-	fs, err := flatfs.New(temp, prefixLen, false)
+	target := p.dir + string(os.PathSeparator) + p.key + ".data"
+	fs, err := flatfs.New(temp, p.dirFunc(len(p.dir)), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
 
-	err = fs.Put(datastore.NewKey("quux"), []byte("foobar"))
+	err = fs.Put(datastore.NewKey(p.key), []byte("foobar"))
 	if err != nil {
 		t.Fatalf("Put fail: %v\n", err)
 	}
@@ -176,9 +191,9 @@ func TestStorage(t *testing.T) {
 		switch path {
 		case ".", "..":
 			// ignore
-		case prefix:
+		case p.dir:
 			if !fi.IsDir() {
-				t.Errorf("prefix directory is not a file? %v", fi.Mode())
+				t.Errorf("%s directory is not a file? %v", p.what, fi.Mode())
 			}
 			// we know it's there if we see the file, nothing more to
 			// do here
@@ -205,11 +220,30 @@ func TestStorage(t *testing.T) {
 	}
 }
 
-func TestHasNotFound(t *testing.T) {
+func TestStorage(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) {
+		testStorage(&params{
+			what:    "prefix",
+			dir:     "qu",
+			key:     "quux",
+			dirFunc: flatfs.Prefix,
+		}, t)
+	})
+	t.Run("suffix", func(t *testing.T) {
+		testStorage(&params{
+			what:    "suffix",
+			dir:     "ux",
+			key:     "quux",
+			dirFunc: flatfs.Suffix,
+		}, t)
+	})
+}
+
+func testHasNotFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -223,11 +257,16 @@ func TestHasNotFound(t *testing.T) {
 	}
 }
 
-func TestHasFound(t *testing.T) {
+func TestHasNotFound(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) { testHasNotFound(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testHasNotFound(flatfs.Prefix, t) })
+}
+
+func testHasFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -245,11 +284,16 @@ func TestHasFound(t *testing.T) {
 	}
 }
 
-func TestDeleteNotFound(t *testing.T) {
+func TestHasFound(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) { testHasFound(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testHasFound(flatfs.Prefix, t) })
+}
+
+func testDeleteNotFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -260,11 +304,16 @@ func TestDeleteNotFound(t *testing.T) {
 	}
 }
 
-func TestDeleteFound(t *testing.T) {
+func TestDeleteNotFound(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) { testDeleteNotFound(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testDeleteNotFound(flatfs.Prefix, t) })
+}
+
+func testDeleteFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -285,11 +334,16 @@ func TestDeleteFound(t *testing.T) {
 	}
 }
 
-func TestQuerySimple(t *testing.T) {
+func TestDeleteFound(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) { testDeleteFound(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testDeleteFound(flatfs.Prefix, t) })
+}
+
+func testQuerySimple(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -321,11 +375,16 @@ func TestQuerySimple(t *testing.T) {
 	}
 }
 
-func TestBatchPut(t *testing.T) {
+func TestQuerySimple(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) { testQuerySimple(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testQuerySimple(flatfs.Prefix, t) })
+}
+
+func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -333,16 +392,26 @@ func TestBatchPut(t *testing.T) {
 	dstest.RunBatchTest(t, fs)
 }
 
-func TestBatchDelete(t *testing.T) {
+func TestBatchPut(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) { testBatchPut(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testBatchPut(flatfs.Prefix, t) })
+}
+
+func testBatchDelete(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
 
 	dstest.RunBatchDeleteTest(t, fs)
+}
+
+func TestBatchDelete(t *testing.T) {
+	t.Run("prefix", func(t *testing.T) { testBatchDelete(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testBatchDelete(flatfs.Prefix, t) })
 }
 
 func BenchmarkConsecutivePut(b *testing.B) {
@@ -360,7 +429,7 @@ func BenchmarkConsecutivePut(b *testing.B) {
 	temp, cleanup := tempdir(b)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, flatfs.Prefix(2), false)
 	if err != nil {
 		b.Fatalf("New fail: %v\n", err)
 	}
@@ -390,7 +459,7 @@ func BenchmarkBatchedPut(b *testing.B) {
 	temp, cleanup := tempdir(b)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, 2, false)
+	fs, err := flatfs.New(temp, flatfs.Prefix(2), false)
 	if err != nil {
 		b.Fatalf("New fail: %v\n", err)
 	}

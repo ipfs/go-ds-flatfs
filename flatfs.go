@@ -22,18 +22,13 @@ import (
 var log = logging.Logger("flatfs")
 
 const (
-	extension    = ".data"
-	maxPrefixLen = 16
-)
-
-var (
-	ErrBadPrefixLen = errors.New("bad prefix length")
+	extension = ".data"
 )
 
 type Datastore struct {
 	path string
-	// length of the dir splay prefix
-	prefixLen int
+
+	getDir ShardFunc
 
 	// sychronize all writes and directory changes for added safety
 	sync bool
@@ -41,24 +36,35 @@ type Datastore struct {
 
 var _ datastore.Datastore = (*Datastore)(nil)
 
-func New(path string, prefixLen int, sync bool) (*Datastore, error) {
-	if prefixLen <= 0 || prefixLen > maxPrefixLen {
-		return nil, ErrBadPrefixLen
-	}
+type ShardFunc func(string) string
+
+func New(path string, getDir ShardFunc, sync bool) (*Datastore, error) {
 	fs := &Datastore{
-		path:      path,
-		prefixLen: prefixLen,
-		sync:      sync,
+		path:   path,
+		getDir: getDir,
+		sync:   sync,
 	}
 	return fs, nil
 }
 
-var padding = strings.Repeat("_", maxPrefixLen)
+func Prefix(prefixLen int) ShardFunc {
+	padding := strings.Repeat("_", prefixLen)
+	return func(noslash string) string {
+		return (noslash + padding)[:prefixLen]
+	}
+}
+
+func Suffix(suffixLen int) ShardFunc {
+	padding := strings.Repeat("_", suffixLen)
+	return func(noslash string) string {
+		str := padding + noslash
+		return str[len(str)-suffixLen:]
+	}
+}
 
 func (fs *Datastore) encode(key datastore.Key) (dir, file string) {
 	noslash := key.String()[1:]
-	prefix := (noslash + padding)[:fs.prefixLen]
-	dir = path.Join(fs.path, prefix)
+	dir = path.Join(fs.path, fs.getDir(noslash))
 	file = path.Join(dir, noslash+extension)
 	return dir, file
 }
@@ -71,8 +77,8 @@ func (fs *Datastore) decode(file string) (key datastore.Key, ok bool) {
 	return datastore.NewKey(name), true
 }
 
-func (fs *Datastore) makePrefixDir(dir string) error {
-	if err := fs.makePrefixDirNoSync(dir); err != nil {
+func (fs *Datastore) makeDir(dir string) error {
+	if err := fs.makeDirNoSync(dir); err != nil {
 		return err
 	}
 
@@ -88,7 +94,7 @@ func (fs *Datastore) makePrefixDir(dir string) error {
 	return nil
 }
 
-func (fs *Datastore) makePrefixDirNoSync(dir string) error {
+func (fs *Datastore) makeDirNoSync(dir string) error {
 	if err := os.Mkdir(dir, 0777); err != nil {
 		// EEXIST is safe to ignore here, that just means the prefix
 		// directory already existed.
@@ -126,7 +132,7 @@ func (fs *Datastore) Put(key datastore.Key, value interface{}) error {
 
 func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 	dir, path := fs.encode(key)
-	if err := fs.makePrefixDir(dir); err != nil {
+	if err := fs.makeDir(dir); err != nil {
 		return err
 	}
 
@@ -184,7 +190,7 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 			return datastore.ErrInvalidType
 		}
 		dir, path := fs.encode(key)
-		if err := fs.makePrefixDirNoSync(dir); err != nil {
+		if err := fs.makeDirNoSync(dir); err != nil {
 			return err
 		}
 		dirsToSync = append(dirsToSync, dir)
