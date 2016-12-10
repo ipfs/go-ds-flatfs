@@ -8,7 +8,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"time"
 
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/query"
@@ -50,30 +49,35 @@ func Move(oldPath string, newPath string, out io.Writer) error {
 		return fmt.Errorf("%s: %v", newPath, err)
 	}
 
-	if out != nil {
-		fmt.Fprintf(out, "Getting Keys...\n")
-	}
 	res, err := oldDS.Query(query.Query{KeysOnly: true})
 	if err != nil {
 		return err
 	}
-	entries, err := res.Rest()
-	if err != nil {
-		return err
-	}
-	prog := newProgress(len(entries), out)
 
 	if out != nil {
 		fmt.Fprintf(out, "Moving Keys...\n")
 	}
 
 	// first move the keys
-	for _, e := range entries {
+	count := 0
+	for {
+		e, ok := res.NextSync()
+		if !ok {
+			break
+		}
+		if e.Error != nil {
+			return e.Error
+		}
+
 		err := moveKey(oldDS, newDS, datastore.RawKey(e.Key))
 		if err != nil {
 			return err
 		}
-		prog.Next()
+
+		count++
+		if out != nil && count%10 == 0 {
+			fmt.Fprintf(out, "\r%d keys so far", count)
+		}
 	}
 
 	if out != nil {
@@ -134,40 +138,4 @@ func moveKey(oldDS *Datastore, newDS *Datastore, key datastore.Key) error {
 		return err
 	}
 	return nil
-}
-
-type progress struct {
-	total   int
-	current int
-
-	out io.Writer
-
-	start time.Time
-}
-
-func newProgress(total int, out io.Writer) *progress {
-	return &progress{
-		total: total,
-		start: time.Now(),
-		out:   out,
-	}
-}
-
-func (p *progress) Next() {
-	p.current++
-	if p.out == nil {
-		return
-	}
-	if p.current%10 == 0 || p.current == p.total {
-		fmt.Fprintf(p.out, "\r[%d / %d]", p.current, p.total)
-	}
-
-	if p.current%100 == 0 || p.current == p.total {
-		took := time.Now().Sub(p.start)
-		av := took / time.Duration(p.current)
-		estim := av * time.Duration(p.total-p.current)
-		//est := strings.Split(estim.String(), ".")[0]
-
-		fmt.Fprintf(p.out, "  Approx time remaining: %s  ", estim)
-	}
 }
