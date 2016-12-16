@@ -30,6 +30,11 @@ func tempdir(t testing.TB) (path string, cleanup func()) {
 	return path, cleanup
 }
 
+func tryAllShardFuncs(t *testing.T, testFunc func(mkShardFunc, *testing.T)) {
+	t.Run("prefix", func(t *testing.T) { testFunc(flatfs.Prefix, t) })
+	t.Run("suffix", func(t *testing.T) { testFunc(flatfs.Suffix, t) })
+}
+
 func TestPutBadValueType(t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
@@ -62,10 +67,7 @@ func testPut(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
-func TestPut(t *testing.T) {
-	t.Run("prefix", func(t *testing.T) { testPut(flatfs.Prefix, t) })
-	t.Run("suffix", func(t *testing.T) { testPut(flatfs.Prefix, t) })
-}
+func TestPut(t *testing.T) { tryAllShardFuncs(t, testPut) }
 
 func testGet(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
@@ -95,10 +97,7 @@ func testGet(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
-func TestGet(t *testing.T) {
-	t.Run("prefix", func(t *testing.T) { testGet(flatfs.Prefix, t) })
-	t.Run("suffix", func(t *testing.T) { testGet(flatfs.Prefix, t) })
-}
+func TestGet(t *testing.T) { tryAllShardFuncs(t, testGet) }
 
 func testPutOverwrite(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
@@ -132,10 +131,7 @@ func testPutOverwrite(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
-func TestPutOverwrite(t *testing.T) {
-	t.Run("prefix", func(t *testing.T) { testPutOverwrite(flatfs.Prefix, t) })
-	t.Run("suffix", func(t *testing.T) { testPutOverwrite(flatfs.Prefix, t) })
-}
+func TestPutOverwrite(t *testing.T) { tryAllShardFuncs(t, testPutOverwrite) }
 
 func testGetNotFoundError(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
@@ -152,10 +148,7 @@ func testGetNotFoundError(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
-func TestGetNotFoundError(t *testing.T) {
-	t.Run("prefix", func(t *testing.T) { testGetNotFoundError(flatfs.Prefix, t) })
-	t.Run("suffix", func(t *testing.T) { testGetNotFoundError(flatfs.Prefix, t) })
-}
+func TestGetNotFoundError(t *testing.T) { tryAllShardFuncs(t, testGetNotFoundError) }
 
 type params struct {
 	what    string
@@ -257,10 +250,7 @@ func testHasNotFound(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
-func TestHasNotFound(t *testing.T) {
-	t.Run("prefix", func(t *testing.T) { testHasNotFound(flatfs.Prefix, t) })
-	t.Run("suffix", func(t *testing.T) { testHasNotFound(flatfs.Prefix, t) })
-}
+func TestHasNotFound(t *testing.T) { tryAllShardFuncs(t, testHasNotFound) }
 
 func testHasFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
@@ -284,10 +274,7 @@ func testHasFound(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
-func TestHasFound(t *testing.T) {
-	t.Run("prefix", func(t *testing.T) { testHasFound(flatfs.Prefix, t) })
-	t.Run("suffix", func(t *testing.T) { testHasFound(flatfs.Prefix, t) })
-}
+func TestHasFound(t *testing.T) { tryAllShardFuncs(t, testHasFound) }
 
 func testDeleteNotFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
@@ -304,10 +291,7 @@ func testDeleteNotFound(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
-func TestDeleteNotFound(t *testing.T) {
-	t.Run("prefix", func(t *testing.T) { testDeleteNotFound(flatfs.Prefix, t) })
-	t.Run("suffix", func(t *testing.T) { testDeleteNotFound(flatfs.Prefix, t) })
-}
+func TestDeleteNotFound(t *testing.T) { tryAllShardFuncs(t, testDeleteNotFound) }
 
 func testDeleteFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
@@ -334,10 +318,7 @@ func testDeleteFound(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
-func TestDeleteFound(t *testing.T) {
-	t.Run("prefix", func(t *testing.T) { testDeleteFound(flatfs.Prefix, t) })
-	t.Run("suffix", func(t *testing.T) { testDeleteFound(flatfs.Prefix, t) })
-}
+func TestDeleteFound(t *testing.T) { tryAllShardFuncs(t, testDeleteFound) }
 
 func testQuerySimple(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
@@ -380,10 +361,7 @@ func testQuerySimple(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
-func TestQuerySimple(t *testing.T) {
-	t.Run("prefix", func(t *testing.T) { testQuerySimple(flatfs.Prefix, t) })
-	t.Run("suffix", func(t *testing.T) { testQuerySimple(flatfs.Prefix, t) })
-}
+func TestQuerySimple(t *testing.T) { tryAllShardFuncs(t, testQuerySimple) }
 
 func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
@@ -397,10 +375,7 @@ func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
 	dstest.RunBatchTest(t, fs)
 }
 
-func TestBatchPut(t *testing.T) {
-	t.Run("prefix", func(t *testing.T) { testBatchPut(flatfs.Prefix, t) })
-	t.Run("suffix", func(t *testing.T) { testBatchPut(flatfs.Prefix, t) })
-}
+func TestBatchPut(t *testing.T) { tryAllShardFuncs(t, testBatchPut) }
 
 func testBatchDelete(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
@@ -414,10 +389,7 @@ func testBatchDelete(dirFunc mkShardFunc, t *testing.T) {
 	dstest.RunBatchDeleteTest(t, fs)
 }
 
-func TestBatchDelete(t *testing.T) {
-	t.Run("prefix", func(t *testing.T) { testBatchDelete(flatfs.Prefix, t) })
-	t.Run("suffix", func(t *testing.T) { testBatchDelete(flatfs.Prefix, t) })
-}
+func TestBatchDelete(t *testing.T) { tryAllShardFuncs(t, testBatchDelete) }
 
 func BenchmarkConsecutivePut(b *testing.B) {
 	r := rand.New()
