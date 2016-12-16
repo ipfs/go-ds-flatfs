@@ -12,8 +12,11 @@ install: true
 script:
     - make deps
     - gx-go rewrite
-    - go get github.com/mattn/goveralls
-    - goveralls -service=travis-ci
+    - go test -race -coverprofile=unittest.coverprofile -covermode=atomic ./...
+
+
+after_success:
+    - bash <(curl -s https://codecov.io/bash) -f unittest.coverprofile -F unittest
 
 cache:
     directories:
