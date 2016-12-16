@@ -62,6 +62,15 @@ func Suffix(suffixLen int) ShardFunc {
 	}
 }
 
+func NextToLast(suffixLen int) ShardFunc {
+	padding := strings.Repeat("_", suffixLen+1)
+	return func(noslash string) string {
+		str := padding + noslash
+		offset := len(str) - suffixLen - 1
+		return str[offset : offset+suffixLen]
+	}
+}
+
 func (fs *Datastore) encode(key datastore.Key) (dir, file string) {
 	noslash := key.String()[1:]
 	dir = path.Join(fs.path, fs.getDir(noslash))
