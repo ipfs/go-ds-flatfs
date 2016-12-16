@@ -33,6 +33,7 @@ func tempdir(t testing.TB) (path string, cleanup func()) {
 func tryAllShardFuncs(t *testing.T, testFunc func(mkShardFunc, *testing.T)) {
 	t.Run("prefix", func(t *testing.T) { testFunc(flatfs.Prefix, t) })
 	t.Run("suffix", func(t *testing.T) { testFunc(flatfs.Suffix, t) })
+	t.Run("next-to-last", func(t *testing.T) { testFunc(flatfs.NextToLast, t) })
 }
 
 func TestPutBadValueType(t *testing.T) {
@@ -228,6 +229,14 @@ func TestStorage(t *testing.T) {
 			dir:     "ux",
 			key:     "quux",
 			dirFunc: flatfs.Suffix,
+		}, t)
+	})
+	t.Run("next-to-last", func(t *testing.T) {
+		testStorage(&params{
+			what:    "next-to-last",
+			dir:     "uu",
+			key:     "quux",
+			dirFunc: flatfs.NextToLast,
 		}, t)
 	})
 }
