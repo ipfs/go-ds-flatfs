@@ -3,6 +3,7 @@ package flatfs_test
 import (
 	"encoding/base32"
 	"io/ioutil"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -399,6 +400,50 @@ func testBatchDelete(dirFunc mkShardFunc, t *testing.T) {
 }
 
 func TestBatchDelete(t *testing.T) { tryAllShardFuncs(t, testBatchDelete) }
+
+func TestNoCluster(t *testing.T) {
+	tempdir, cleanup := tempdir(t)
+	defer cleanup()
+
+	fs, err := flatfs.New(tempdir, flatfs.NextToLast(1), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	r := rand.New()
+	N := 1024 // should be divisible by 32 so the math works out
+	for i := 0; i < N; i++ {
+		blk := make([]byte, 1000)
+		r.Read(blk)
+
+		key := "CIQ" + base32.StdEncoding.EncodeToString(blk[:10])
+		err := fs.Put(datastore.NewKey(key), blk)
+		if err != nil {
+			t.Fatalf("Put fail: %v\n", err)
+		}
+	}
+
+	dirs, err := ioutil.ReadDir(tempdir)
+	if err != nil {
+		t.Fatalf("ReadDir fail: %v\n", err)
+	}
+	if len(dirs) != 32 {
+		t.Fatalf("Expected 32 directories in %s", tempdir)
+	}
+	idealFilesPerDir := float64(N) / 32.0
+	tolerance := math.Floor(idealFilesPerDir * 0.50)
+	for _, dir := range dirs {
+		files, err := ioutil.ReadDir(filepath.Join(tempdir, dir.Name()))
+		if err != nil {
+			t.Fatalf("ReadDir fail: %v\n", err)
+		}
+		num := float64(len(files))
+		if math.Abs(num-idealFilesPerDir) > tolerance {
+			t.Fatalf("Dir %s has %.0f files, expected between %.f and %.f files",
+				filepath.Join(tempdir, dir.Name()), num, idealFilesPerDir-tolerance, idealFilesPerDir+tolerance)
+		}
+	}
+}
 
 func BenchmarkConsecutivePut(b *testing.B) {
 	r := rand.New()
