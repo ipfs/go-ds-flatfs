@@ -4,6 +4,7 @@ import (
 	"encoding/base32"
 	"io/ioutil"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -14,7 +15,7 @@ import (
 	dstest "github.com/ipfs/go-datastore/test"
 	"github.com/ipfs/go-ds-flatfs"
 
-	rand "github.com/dustin/randbo"
+	randbo "github.com/dustin/randbo"
 )
 
 func tempdir(t testing.TB) (path string, cleanup func()) {
@@ -410,8 +411,8 @@ func TestNoCluster(t *testing.T) {
 		t.Fatalf("New fail: %v\n", err)
 	}
 
-	r := rand.New()
-	N := 1024 // should be divisible by 32 so the math works out
+	r := randbo.NewFrom(rand.NewSource(0))
+	N := 3200 // should be divisible by 32 so the math works out
 	for i := 0; i < N; i++ {
 		blk := make([]byte, 1000)
 		r.Read(blk)
@@ -431,7 +432,7 @@ func TestNoCluster(t *testing.T) {
 		t.Fatalf("Expected 32 directories in %s", tempdir)
 	}
 	idealFilesPerDir := float64(N) / 32.0
-	tolerance := math.Floor(idealFilesPerDir * 0.50)
+	tolerance := math.Floor(idealFilesPerDir * 0.20)
 	for _, dir := range dirs {
 		files, err := ioutil.ReadDir(filepath.Join(tempdir, dir.Name()))
 		if err != nil {
@@ -446,7 +447,7 @@ func TestNoCluster(t *testing.T) {
 }
 
 func BenchmarkConsecutivePut(b *testing.B) {
-	r := rand.New()
+	r := randbo.New()
 	var blocks [][]byte
 	var keys []datastore.Key
 	for i := 0; i < b.N; i++ {
@@ -476,7 +477,7 @@ func BenchmarkConsecutivePut(b *testing.B) {
 }
 
 func BenchmarkBatchedPut(b *testing.B) {
-	r := rand.New()
+	r := randbo.New()
 	var blocks [][]byte
 	var keys []datastore.Key
 	for i := 0; i < b.N; i++ {
