@@ -5,6 +5,7 @@ package flatfs
 
 import (
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
@@ -28,7 +29,8 @@ const (
 type Datastore struct {
 	path string
 
-	getDir ShardFunc
+	shardFunc string
+	getDir    ShardFunc
 
 	// sychronize all writes and directory changes for added safety
 	sync bool
@@ -38,37 +40,51 @@ var _ datastore.Datastore = (*Datastore)(nil)
 
 type ShardFunc func(string) string
 
-func New(path string, getDir ShardFunc, sync bool) (*Datastore, error) {
+func New(path string, fun0 string, sync bool) (*Datastore, error) {
+	fun0 = NormalizeShardFunc(fun0)
+
+	fun1, err := ReadShardFunc(path)
+	if err != nil {
+		return nil, err
+	}
+
+	fun := ""
+	switch {
+	case fun0 == "auto" && fun1 == "auto":
+		return nil, fmt.Errorf("shard function not specified")
+	case fun0 == "auto":
+		fun = fun1
+	case fun1 == "auto":
+		fun = fun0
+	case fun0 != fun1:
+		return nil, fmt.Errorf("specified shard func '%s' does not match repo shard func '%s'",
+			fun0, fun1)
+	default:
+		fun = fun0
+	}
+	getDir, err := ShardFuncFromString(fun)
+	if err != nil {
+		return nil, fmt.Errorf("unable to parse shard func: %v", err)
+	}
+
+	if fun1 == "auto" {
+		err := WriteShardFunc(path, fun)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	fs := &Datastore{
-		path:   path,
-		getDir: getDir,
-		sync:   sync,
+		path:      path,
+		shardFunc: fun,
+		getDir:    getDir,
+		sync:      sync,
 	}
 	return fs, nil
 }
 
-func Prefix(prefixLen int) ShardFunc {
-	padding := strings.Repeat("_", prefixLen)
-	return func(noslash string) string {
-		return (noslash + padding)[:prefixLen]
-	}
-}
-
-func Suffix(suffixLen int) ShardFunc {
-	padding := strings.Repeat("_", suffixLen)
-	return func(noslash string) string {
-		str := padding + noslash
-		return str[len(str)-suffixLen:]
-	}
-}
-
-func NextToLast(suffixLen int) ShardFunc {
-	padding := strings.Repeat("_", suffixLen+1)
-	return func(noslash string) string {
-		str := padding + noslash
-		offset := len(str) - suffixLen - 1
-		return str[offset : offset+suffixLen]
-	}
+func (fs *Datastore) ShardFunc() string {
+	return fs.shardFunc
 }
 
 func (fs *Datastore) encode(key datastore.Key) (dir, file string) {
