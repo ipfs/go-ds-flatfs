@@ -40,6 +40,8 @@ var _ datastore.Datastore = (*Datastore)(nil)
 
 type ShardFunc func(string) string
 
+var IPFS_DEF_SHARD = "v1/next-to-last/2"
+
 func New(path string, fun0 string, sync bool) (*Datastore, error) {
 	fun0 = NormalizeShardFunc(fun0)
 
