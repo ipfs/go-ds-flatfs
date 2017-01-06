@@ -104,6 +104,12 @@ func WriteShardFunc(dir, str string) error {
 	if err != nil {
 		return err
 	}
+	if str == IPFS_DEF_SHARD {
+		err := ioutil.WriteFile(filepath.Join(dir, "_README"), []byte(README_IPFS_DEF_SHARD), 0444)
+		if err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

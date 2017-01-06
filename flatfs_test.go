@@ -175,6 +175,7 @@ func testStorage(p *params, t *testing.T) {
 	}
 
 	seen := false
+	haveREADME := false
 	walk := func(absPath string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -186,6 +187,12 @@ func testStorage(p *params, t *testing.T) {
 		switch path {
 		case ".", "..", "SHARDING":
 			// ignore
+		case "_README":
+			_, err := ioutil.ReadFile(absPath)
+			if err != nil {
+				t.Error("could not read _README file")
+			}
+			haveREADME = true
 		case p.dir:
 			if !fi.IsDir() {
 				t.Errorf("%s directory is not a file? %v", p.what, fi.Mode())
@@ -212,6 +219,11 @@ func testStorage(p *params, t *testing.T) {
 	}
 	if !seen {
 		t.Error("did not see the data file")
+	}
+	if fs.ShardFunc() == flatfs.IPFS_DEF_SHARD && !haveREADME {
+		t.Error("expected _README file")
+	} else if fs.ShardFunc() != flatfs.IPFS_DEF_SHARD && haveREADME {
+		t.Error("did not expect _README file")
 	}
 }
 
@@ -405,7 +417,7 @@ func TestSHARDINGFile(t *testing.T) {
 	tempdir, cleanup := tempdir(t)
 	defer cleanup()
 
-	fun := "next-to-last/2"
+	fun := flatfs.IPFS_DEF_SHARD
 
 	fs, err := flatfs.New(tempdir, fun, false)
 	if err != nil {
