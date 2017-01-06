@@ -16,11 +16,15 @@ prefixes, we now use the next-to-last two charters.
       return str[offset : offset+nextToLastLen]
     }
 
-For example, an object with a CIDv1 of
+For example, an object with a base58 CIDv1 of
+
+    zb2rhYSxw4ZjuzgCnWSt19Q94ERaeFhu9uSqRgjSdx9bsgM6f
+
+has a base32 CIDv1 of
 
     BAFKREIA22FLID5AJ2KU7URG47MDLROZIH6YF2KALU2PWEFPVI37YLKRSCA
 
-Will be placed at
+and will be placed at
 
     SC/AFKREIA22FLID5AJ2KU7URG47MDLROZIH6YF2KALU2PWEFPVI37YLKRSCA.data
 
