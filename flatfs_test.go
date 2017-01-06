@@ -2,7 +2,6 @@ package flatfs_test
 
 import (
 	"encoding/base32"
-	"fmt"
 	"io/ioutil"
 	"math"
 	"math/rand"
@@ -153,10 +152,9 @@ func testGetNotFoundError(dirFunc string, t *testing.T) {
 func TestGetNotFoundError(t *testing.T) { tryAllShardFuncs(t, testGetNotFoundError) }
 
 type params struct {
-	what    string
-	dir     string
-	key     string
-	dirFunc string
+	shard string
+	dir   string
+	key   string
 }
 
 func testStorage(p *params, t *testing.T) {
@@ -164,7 +162,7 @@ func testStorage(p *params, t *testing.T) {
 	defer cleanup()
 
 	target := p.dir + string(os.PathSeparator) + p.key + ".data"
-	fs, err := flatfs.New(temp, fmt.Sprintf("%s/%d", p.dirFunc, len(p.dir)), false)
+	fs, err := flatfs.New(temp, p.shard, false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -195,7 +193,7 @@ func testStorage(p *params, t *testing.T) {
 			haveREADME = true
 		case p.dir:
 			if !fi.IsDir() {
-				t.Errorf("%s directory is not a file? %v", p.what, fi.Mode())
+				t.Errorf("directory is not a file? %v", fi.Mode())
 			}
 			// we know it's there if we see the file, nothing more to
 			// do here
@@ -230,26 +228,23 @@ func testStorage(p *params, t *testing.T) {
 func TestStorage(t *testing.T) {
 	t.Run("prefix", func(t *testing.T) {
 		testStorage(&params{
-			what:    "prefix",
-			dir:     "qu",
-			key:     "quux",
-			dirFunc: "prefix",
+			shard: "v1/prefix/2",
+			dir:   "qu",
+			key:   "quux",
 		}, t)
 	})
 	t.Run("suffix", func(t *testing.T) {
 		testStorage(&params{
-			what:    "suffix",
-			dir:     "ux",
-			key:     "quux",
-			dirFunc: "suffix",
+			shard: "v1/suffix/2",
+			dir:   "ux",
+			key:   "quux",
 		}, t)
 	})
 	t.Run("next-to-last", func(t *testing.T) {
 		testStorage(&params{
-			what:    "next-to-last",
-			dir:     "uu",
-			key:     "quux",
-			dirFunc: "next-to-last",
+			shard: flatfs.IPFS_DEF_SHARD,
+			dir:   "uu",
+			key:   "quux",
 		}, t)
 	})
 }
