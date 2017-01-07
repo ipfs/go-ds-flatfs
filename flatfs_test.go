@@ -424,8 +424,8 @@ func TestSHARDINGFile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
-	if fs.ShardFunc() != flatfs.NormalizeShardFunc(fun) {
-		t.Fatalf("Shard function in repo not %s", fun)
+	if fs.ShardFunc() != flatfs.IPFS_DEF_SHARD {
+		t.Fatalf("Expected '%s' for shard function got '%s'", flatfs.IPFS_DEF_SHARD, fs.ShardFunc())
 	}
 	fs.Close()
 

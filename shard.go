@@ -19,7 +19,7 @@ func (f shardId) str() string {
 	if f.funName == "" || f.funName == "auto" {
 		return "auto"
 	} else {
-		return fmt.Sprintf("v1/%s/%s", f.funName, f.param)
+		return fmt.Sprintf("/repo/flatfs/shard/v1/%s/%s", f.funName, f.param)
 	}
 }
 
