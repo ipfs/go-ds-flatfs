@@ -53,21 +53,23 @@ func Create(path string, funStr string) error {
 		return err
 	}
 
+	fun, err := ParseShardFunc(funStr)
+	if err != nil {
+		return err
+	}
+
 	dsFun, err := ReadShardFunc(path)
 	switch err {
 	case ShardingFileMissing:
 		// fixme: make sure directory is empty and return an error if
 		// it is not
-		err := WriteShardFunc(path, funStr)
+		err := WriteShardFunc(path, fun)
 		if err != nil {
 			return err
 		}
-		return nil
+		err = WriteReadme(path, fun)
+		return err
 	case nil:
-		fun, err := ParseShardFunc(funStr)
-		if err != nil {
-			return err
-		}
 		if fun.String() != dsFun.String() {
 			return fmt.Errorf("specified shard func '%s' does not match repo shard func '%s'",
 				fun.String(), dsFun.String())

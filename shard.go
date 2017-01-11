@@ -42,8 +42,8 @@ func ParseShardFunc(str string) (*ShardIdV1, error) {
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("invalid shard identifier: %s", str)
 	}
-	
-	id := &ShardIdV1 {funName: parts[0]}
+
+	id := &ShardIdV1{funName: parts[0]}
 
 	param, err := strconv.Atoi(parts[1])
 	if err != nil {
@@ -75,11 +75,7 @@ func ReadShardFunc(dir string) (*ShardIdV1, error) {
 	return ParseShardFunc(string(buf))
 }
 
-func WriteShardFunc(dir, str string) error {
-	id, err := ParseShardFunc(str)
-	if err != nil {
-		return err
-	}
+func WriteShardFunc(dir string, id *ShardIdV1) error {
 	file, err := os.Create(filepath.Join(dir, "SHARDING"))
 	if err != nil {
 		return err
@@ -90,10 +86,11 @@ func WriteShardFunc(dir, str string) error {
 		return err
 	}
 	_, err = file.WriteString("\n")
-	if err != nil {
-		return err
-	}
-	if str == IPFS_DEF_SHARD {
+	return err
+}
+
+func WriteReadme(dir string, id *ShardIdV1) error {
+	if id.String() == IPFS_DEF_SHARD {
 		err := ioutil.WriteFile(filepath.Join(dir, "_README"), []byte(README_IPFS_DEF_SHARD), 0444)
 		if err != nil {
 			return err
