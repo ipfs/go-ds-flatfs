@@ -15,10 +15,10 @@ type ShardIdV1 struct {
 	fun     ShardFunc
 }
 
-const PREFIX = "/repo/flatfs/shard"
+const PREFIX = "/repo/flatfs/shard/"
 
 func (f *ShardIdV1) String() string {
-	return fmt.Sprintf("%s/v1/%s/%d", PREFIX, f.funName, f.param)
+	return fmt.Sprintf("%sv1/%s/%d", PREFIX, f.funName, f.param)
 }
 
 func (f *ShardIdV1) Func() ShardFunc {
@@ -27,11 +27,17 @@ func (f *ShardIdV1) Func() ShardFunc {
 
 func ParseShardFunc(str string) (*ShardIdV1, error) {
 	str = strings.TrimSpace(str)
-	parts := strings.Split(str, "/")
 	// ignore prefix for now
-	if len(parts) > 3 {
-		parts = parts[len(parts)-3:]
+	if len(str) == 0 {
+		return nil, fmt.Errorf("empty shard identifier")
 	}
+	if str[0] == '/' {
+		if !strings.HasPrefix(str, PREFIX) {
+			return nil, fmt.Errorf("invalid prefix in shard identifier: %s", str)
+		}
+		str = str[len(PREFIX):]
+	}
+	parts := strings.Split(str, "/")
 	if len(parts) == 3 {
 		version := parts[0]
 		if version != "v1" {

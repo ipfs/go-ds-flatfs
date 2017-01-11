@@ -440,6 +440,16 @@ func TestSHARDINGFile(t *testing.T) {
 	}
 }
 
+func TestInvalidPrefix(t *testing.T) {
+	tempdir, cleanup := tempdir(t)
+	defer cleanup()
+
+	err := flatfs.Create(tempdir, "/bad/prefix/v1/next-to-last/2")
+	if err == nil {
+		t.Fatalf("Expected an error when creating a datastore with a bad prefix for the sharding function")
+	}
+}
+
 func TestNoCluster(t *testing.T) {
 	tempdir, cleanup := tempdir(t)
 	defer cleanup()
