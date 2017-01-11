@@ -40,40 +40,58 @@ var _ datastore.Datastore = (*Datastore)(nil)
 
 type ShardFunc func(string) string
 
+var DatastoreExists = errors.New("Datastore already exist")
+var DatastoreDoesNotExist = errors.New("Datastore directory does not exist")
+var ShardingFileMissing = errors.New("SHARDING file not found in datastore")
+
 const IPFS_DEF_SHARD = "/repo/flatfs/shard/v1/next-to-last/2"
 
-func New(path string, fun0 string, sync bool) (*Datastore, error) {
-	fun0 = NormalizeShardFunc(fun0)
+func Create(path string, fun string) error {
 
-	fun1, err := ReadShardFunc(path)
+	err := os.Mkdir(path, 0777)
+	if err != nil && !os.IsExist(err) {
+		return err
+	}
+
+	dsFun, err := ReadShardFunc(path)
+	switch err {
+	case ShardingFileMissing:
+		// fixme: make sure directory is empty and return an error if
+		// it is not
+		err := WriteShardFunc(path, fun)
+		if err != nil {
+			return err
+		}
+		return nil
+	case nil:
+		_ = dsFun
+		fun = NormalizeShardFunc(fun)
+		if fun != dsFun {
+			return fmt.Errorf("specified shard func '%s' does not match repo shard func '%s'",
+				fun, dsFun)
+		}
+		return DatastoreExists
+	default:
+		return err
+	}
+}
+
+func Open(path string, sync bool) (*Datastore, error) {
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return nil, DatastoreDoesNotExist
+	} else if err != nil {
+		return nil, err
+	}
+
+	fun, err := ReadShardFunc(path)
 	if err != nil {
 		return nil, err
 	}
 
-	fun := ""
-	switch {
-	case fun0 == "auto" && fun1 == "auto":
-		return nil, fmt.Errorf("shard function not specified")
-	case fun0 == "auto":
-		fun = fun1
-	case fun1 == "auto":
-		fun = fun0
-	case fun0 != fun1:
-		return nil, fmt.Errorf("specified shard func '%s' does not match repo shard func '%s'",
-			fun0, fun1)
-	default:
-		fun = fun0
-	}
 	getDir, err := ShardFuncFromString(fun)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse shard func: %v", err)
-	}
-
-	if fun1 == "auto" {
-		err := WriteShardFunc(path, fun)
-		if err != nil {
-			return nil, err
-		}
 	}
 
 	fs := &Datastore{
@@ -83,6 +101,15 @@ func New(path string, fun0 string, sync bool) (*Datastore, error) {
 		sync:      sync,
 	}
 	return fs, nil
+}
+
+// convince method, fixme: maybe just call it "New"?
+func CreateOrOpen(path string, fun string, sync bool) (*Datastore, error) {
+	err := Create(path, fun)
+	if err != nil && err != DatastoreExists {
+		return nil, err
+	}
+	return Open(path, sync)
 }
 
 func (fs *Datastore) ShardFunc() string {

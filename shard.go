@@ -16,11 +16,7 @@ type shardId struct {
 }
 
 func (f shardId) str() string {
-	if f.funName == "" || f.funName == "auto" {
-		return "auto"
-	} else {
-		return fmt.Sprintf("/repo/flatfs/shard/v1/%s/%s", f.funName, f.param)
-	}
+	return fmt.Sprintf("/repo/flatfs/shard/v1/%s/%s", f.funName, f.param)
 }
 
 func parseShardFunc(str string) shardId {
@@ -79,18 +75,21 @@ func ShardFuncFromString(str string) (ShardFunc, error) {
 }
 
 func ReadShardFunc(dir string) (string, error) {
-	fun := "auto"
 	buf, err := ioutil.ReadFile(filepath.Join(dir, "SHARDING"))
-	str := string(buf)
-	if err == nil && len(str) != 0 {
-		fun = NormalizeShardFunc(str)
-	} else if err != os.ErrNotExist {
-		fmt.Errorf("unable to read shard function from repo: %v", err)
+	if os.IsNotExist(err) {
+		return "", ShardingFileMissing
+	} else if err != nil {
+		return "", err
 	}
-	return fun, nil
+	return NormalizeShardFunc(string(buf)), nil
 }
 
 func WriteShardFunc(dir, str string) error {
+	str = NormalizeShardFunc(str)
+	_, err := ShardFuncFromString(str)
+	if err != nil {
+		return err
+	}
 	file, err := os.Create(filepath.Join(dir, "SHARDING"))
 	if err != nil {
 		return err
