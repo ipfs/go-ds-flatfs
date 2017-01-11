@@ -9,84 +9,74 @@ import (
 	"strings"
 )
 
-type shardId struct {
-	version string
+type ShardIdV1 struct {
 	funName string
-	param   string
+	param   int
+	fun     ShardFunc
 }
 
-func (f shardId) str() string {
-	return fmt.Sprintf("/repo/flatfs/shard/v1/%s/%s", f.funName, f.param)
+const PREFIX = "/repo/flatfs/shard"
+
+func (f *ShardIdV1) String() string {
+	return fmt.Sprintf("%s/v1/%s/%d", PREFIX, f.funName, f.param)
 }
 
-func parseShardFunc(str string) shardId {
+func (f *ShardIdV1) Func() ShardFunc {
+	return f.fun
+}
+
+func ParseShardFunc(str string) (*ShardIdV1, error) {
 	str = strings.TrimSpace(str)
 	parts := strings.Split(str, "/")
 	// ignore prefix for now
 	if len(parts) > 3 {
 		parts = parts[len(parts)-3:]
 	}
-	switch len(parts) {
-	case 3:
-		return shardId{version: parts[0], funName: parts[1], param: parts[2]}
-	case 2:
-		return shardId{funName: parts[0], param: parts[1]}
-	case 1:
-		return shardId{funName: parts[0]}
-	default: // can only happen for len == 0
-		return shardId{}
+	if len(parts) == 3 {
+		version := parts[0]
+		if version != "v1" {
+			return nil, fmt.Errorf("expected 'v1' for version string got: %s\n", version)
+		}
+		parts = parts[1:]
 	}
-}
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("invalid shard identifier: %s", str)
+	}
+	
+	id := &ShardIdV1 {funName: parts[0]}
 
-func (f shardId) Func() (ShardFunc, error) {
-	if f.version != "" && f.version != "v1" {
-		return nil, fmt.Errorf("expected 'v1' for version string got: %s\n", f.version)
-	}
-	if f.param == "" {
-		return nil, fmt.Errorf("'%s' function requires a parameter", f.funName)
-	}
-	len, err := strconv.Atoi(f.param)
+	param, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("invalid parameter: %v", err)
 	}
-	switch f.funName {
+	id.param = param
+
+	switch id.funName {
 	case "prefix":
-		return Prefix(len), nil
+		id.fun = Prefix(param)
 	case "suffix":
-		return Suffix(len), nil
+		id.fun = Suffix(param)
 	case "next-to-last":
-		return NextToLast(len), nil
+		id.fun = NextToLast(param)
 	default:
-		return nil, fmt.Errorf("expected 'prefix', 'suffix' or 'next-to-last' got: %s", f.funName)
+		return nil, fmt.Errorf("expected 'prefix', 'suffix' or 'next-to-last' got: %s", id.funName)
 	}
+
+	return id, nil
 }
 
-func NormalizeShardFunc(str string) string {
-	return parseShardFunc(str).str()
-}
-
-func ShardFuncFromString(str string) (ShardFunc, error) {
-	id := parseShardFunc(str)
-	fun, err := id.Func()
-	if err != nil {
-		return nil, err
-	}
-	return fun, nil
-}
-
-func ReadShardFunc(dir string) (string, error) {
+func ReadShardFunc(dir string) (*ShardIdV1, error) {
 	buf, err := ioutil.ReadFile(filepath.Join(dir, "SHARDING"))
 	if os.IsNotExist(err) {
-		return "", ShardingFileMissing
+		return nil, ShardingFileMissing
 	} else if err != nil {
-		return "", err
+		return nil, err
 	}
-	return NormalizeShardFunc(string(buf)), nil
+	return ParseShardFunc(string(buf))
 }
 
 func WriteShardFunc(dir, str string) error {
-	str = NormalizeShardFunc(str)
-	_, err := ShardFuncFromString(str)
+	id, err := ParseShardFunc(str)
 	if err != nil {
 		return err
 	}
@@ -95,7 +85,7 @@ func WriteShardFunc(dir, str string) error {
 		return err
 	}
 	defer file.Close()
-	_, err = file.WriteString(str)
+	_, err = file.WriteString(id.String())
 	if err != nil {
 		return err
 	}

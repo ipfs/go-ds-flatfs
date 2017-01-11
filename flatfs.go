@@ -46,7 +46,7 @@ var ShardingFileMissing = errors.New("SHARDING file not found in datastore")
 
 const IPFS_DEF_SHARD = "/repo/flatfs/shard/v1/next-to-last/2"
 
-func Create(path string, fun string) error {
+func Create(path string, funStr string) error {
 
 	err := os.Mkdir(path, 0777)
 	if err != nil && !os.IsExist(err) {
@@ -58,17 +58,19 @@ func Create(path string, fun string) error {
 	case ShardingFileMissing:
 		// fixme: make sure directory is empty and return an error if
 		// it is not
-		err := WriteShardFunc(path, fun)
+		err := WriteShardFunc(path, funStr)
 		if err != nil {
 			return err
 		}
 		return nil
 	case nil:
-		_ = dsFun
-		fun = NormalizeShardFunc(fun)
-		if fun != dsFun {
+		fun, err := ParseShardFunc(funStr)
+		if err != nil {
+			return err
+		}
+		if fun.String() != dsFun.String() {
 			return fmt.Errorf("specified shard func '%s' does not match repo shard func '%s'",
-				fun, dsFun)
+				fun.String(), dsFun.String())
 		}
 		return DatastoreExists
 	default:
@@ -84,20 +86,19 @@ func Open(path string, sync bool) (*Datastore, error) {
 		return nil, err
 	}
 
-	fun, err := ReadShardFunc(path)
+	shardId, err := ReadShardFunc(path)
 	if err != nil {
 		return nil, err
 	}
 
-	getDir, err := ShardFuncFromString(fun)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse shard func: %v", err)
 	}
 
 	fs := &Datastore{
 		path:      path,
-		shardFunc: fun,
-		getDir:    getDir,
+		shardFunc: shardId.String(),
+		getDir:    shardId.Func(),
 		sync:      sync,
 	}
 	return fs, nil
