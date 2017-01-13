@@ -40,9 +40,11 @@ var _ datastore.Datastore = (*Datastore)(nil)
 
 type ShardFunc func(string) string
 
-var DatastoreExists = errors.New("Datastore already exist")
-var DatastoreDoesNotExist = errors.New("Datastore directory does not exist")
-var ShardingFileMissing = errors.New("SHARDING file not found in datastore")
+var (
+	ErrDatastoreExists = errors.New("Datastore already exist")
+	ErrDatastoreDoesNotExist = errors.New("Datastore directory does not exist")
+	ErrShardingFileMissing = errors.New("SHARDING file not found in datastore")
+)
 
 const IPFS_DEF_SHARD = "/repo/flatfs/shard/v1/next-to-last/2"
 
@@ -60,7 +62,7 @@ func Create(path string, funStr string) error {
 
 	dsFun, err := ReadShardFunc(path)
 	switch err {
-	case ShardingFileMissing:
+	case ErrShardingFileMissing:
 		// fixme: make sure directory is empty and return an error if
 		// it is not
 		err := WriteShardFunc(path, fun)
@@ -74,7 +76,7 @@ func Create(path string, funStr string) error {
 			return fmt.Errorf("specified shard func '%s' does not match repo shard func '%s'",
 				fun.String(), dsFun.String())
 		}
-		return DatastoreExists
+		return ErrDatastoreExists
 	default:
 		return err
 	}
@@ -83,7 +85,7 @@ func Create(path string, funStr string) error {
 func Open(path string, sync bool) (*Datastore, error) {
 	_, err := os.Stat(path)
 	if os.IsNotExist(err) {
-		return nil, DatastoreDoesNotExist
+		return nil, ErrDatastoreDoesNotExist
 	} else if err != nil {
 		return nil, err
 	}
@@ -91,10 +93,6 @@ func Open(path string, sync bool) (*Datastore, error) {
 	shardId, err := ReadShardFunc(path)
 	if err != nil {
 		return nil, err
-	}
-
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse shard func: %v", err)
 	}
 
 	fs := &Datastore{
@@ -109,7 +107,7 @@ func Open(path string, sync bool) (*Datastore, error) {
 // convince method, fixme: maybe just call it "New"?
 func CreateOrOpen(path string, fun string, sync bool) (*Datastore, error) {
 	err := Create(path, fun)
-	if err != nil && err != DatastoreExists {
+	if err != nil && err != ErrDatastoreExists {
 		return nil, err
 	}
 	return Open(path, sync)

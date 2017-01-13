@@ -32,10 +32,11 @@ func ParseShardFunc(str string) (*ShardIdV1, error) {
 		return nil, fmt.Errorf("empty shard identifier")
 	}
 	if str[0] == '/' {
-		if !strings.HasPrefix(str, PREFIX) {
+		trimmed := strings.TrimPrefix(str, PREFIX)
+		if str == trimmed { // nothing trimmed
 			return nil, fmt.Errorf("invalid prefix in shard identifier: %s", str)
 		}
-		str = str[len(PREFIX):]
+		str = trimmed
 	}
 	parts := strings.Split(str, "/")
 	if len(parts) == 3 {
@@ -74,7 +75,7 @@ func ParseShardFunc(str string) (*ShardIdV1, error) {
 func ReadShardFunc(dir string) (*ShardIdV1, error) {
 	buf, err := ioutil.ReadFile(filepath.Join(dir, "SHARDING"))
 	if os.IsNotExist(err) {
-		return nil, ShardingFileMissing
+		return nil, ErrShardingFileMissing
 	} else if err != nil {
 		return nil, err
 	}
