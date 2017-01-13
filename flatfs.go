@@ -41,8 +41,8 @@ var _ datastore.Datastore = (*Datastore)(nil)
 type ShardFunc func(string) string
 
 var (
-	ErrDatastoreExists       = errors.New("Datastore already exist")
-	ErrDatastoreDoesNotExist = errors.New("Datastore directory does not exist")
+	ErrDatastoreExists       = errors.New("datastore already exist")
+	ErrDatastoreDoesNotExist = errors.New("datastore directory does not exist")
 	ErrShardingFileMissing   = errors.New("SHARDING file not found in datastore")
 )
 
@@ -63,9 +63,15 @@ func Create(path string, funStr string) error {
 	dsFun, err := ReadShardFunc(path)
 	switch err {
 	case ErrShardingFileMissing:
-		// fixme: make sure directory is empty and return an error if
-		// it is not
-		err := WriteShardFunc(path, fun)
+		isEmpty, err := DirIsEmpty(path)
+		if err != nil {
+			return err
+		}
+		if !isEmpty {
+			return fmt.Errorf("directory missing SHARDING file: %s", path)
+		}
+
+		err = WriteShardFunc(path, fun)
 		if err != nil {
 			return err
 		}
@@ -104,7 +110,7 @@ func Open(path string, sync bool) (*Datastore, error) {
 	return fs, nil
 }
 
-// convince method, fixme: maybe just call it "New"?
+// convenience method
 func CreateOrOpen(path string, fun string, sync bool) (*Datastore, error) {
 	err := Create(path, fun)
 	if err != nil && err != ErrDatastoreExists {

@@ -341,11 +341,6 @@ func testQuerySimple(dirFunc string, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	err := ioutil.WriteFile(filepath.Join(temp, "README"), []byte("something"), 0666)
-	if err != nil {
-		t.Fatalf("WriteFile fail: %v\n", err)
-	}
-
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc+"/2", false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
@@ -447,6 +442,18 @@ func TestInvalidPrefix(t *testing.T) {
 	err := flatfs.Create(tempdir, "/bad/prefix/v1/next-to-last/2")
 	if err == nil {
 		t.Fatalf("Expected an error when creating a datastore with a bad prefix for the sharding function")
+	}
+}
+
+func TestNonDatastoreDir(t *testing.T) {
+	tempdir, cleanup := tempdir(t)
+	defer cleanup()
+
+	ioutil.WriteFile(filepath.Join(tempdir, "afile"), []byte("Some Content"), 0644)
+
+	err := flatfs.Create(tempdir, "/bad/prefix/v1/next-to-last/2")
+	if err == nil {
+		t.Fatalf("Expected an error when creating a datastore in a non-empty directory")
 	}
 }
 
