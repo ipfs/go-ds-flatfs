@@ -43,7 +43,7 @@ type ShardFunc func(string) string
 var (
 	ErrDatastoreExists       = errors.New("datastore already exist")
 	ErrDatastoreDoesNotExist = errors.New("datastore directory does not exist")
-	ErrShardingFileMissing   = errors.New("SHARDING file not found in datastore")
+	ErrShardingFileMissing   = fmt.Errorf("%s file not found in datastore", SHARDING_FN)
 )
 
 const IPFS_DEF_SHARD = "/repo/flatfs/shard/v1/next-to-last/2"
@@ -68,7 +68,7 @@ func Create(path string, funStr string) error {
 			return err
 		}
 		if !isEmpty {
-			return fmt.Errorf("directory missing SHARDING file: %s", path)
+			return fmt.Errorf("directory missing %s file: %s", SHARDING_FN, path)
 		}
 
 		err = WriteShardFunc(path, fun)

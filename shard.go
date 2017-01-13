@@ -16,6 +16,8 @@ type ShardIdV1 struct {
 }
 
 const PREFIX = "/repo/flatfs/shard/"
+const SHARDING_FN = "SHARDING"
+const README_FN = "README"
 
 func (f *ShardIdV1) String() string {
 	return fmt.Sprintf("%sv1/%s/%d", PREFIX, f.funName, f.param)
@@ -72,7 +74,7 @@ func ParseShardFunc(str string) (*ShardIdV1, error) {
 }
 
 func ReadShardFunc(dir string) (*ShardIdV1, error) {
-	buf, err := ioutil.ReadFile(filepath.Join(dir, "SHARDING"))
+	buf, err := ioutil.ReadFile(filepath.Join(dir, SHARDING_FN))
 	if os.IsNotExist(err) {
 		return nil, ErrShardingFileMissing
 	} else if err != nil {
@@ -82,7 +84,7 @@ func ReadShardFunc(dir string) (*ShardIdV1, error) {
 }
 
 func WriteShardFunc(dir string, id *ShardIdV1) error {
-	file, err := os.Create(filepath.Join(dir, "SHARDING"))
+	file, err := os.Create(filepath.Join(dir, SHARDING_FN))
 	if err != nil {
 		return err
 	}
@@ -97,7 +99,7 @@ func WriteShardFunc(dir string, id *ShardIdV1) error {
 
 func WriteReadme(dir string, id *ShardIdV1) error {
 	if id.String() == IPFS_DEF_SHARD {
-		err := ioutil.WriteFile(filepath.Join(dir, "_README"), []byte(README_IPFS_DEF_SHARD), 0444)
+		err := ioutil.WriteFile(filepath.Join(dir, README_FN), []byte(README_IPFS_DEF_SHARD), 0444)
 		if err != nil {
 			return err
 		}
