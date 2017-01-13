@@ -41,9 +41,9 @@ var _ datastore.Datastore = (*Datastore)(nil)
 type ShardFunc func(string) string
 
 var (
-	ErrDatastoreExists = errors.New("Datastore already exist")
+	ErrDatastoreExists       = errors.New("Datastore already exist")
 	ErrDatastoreDoesNotExist = errors.New("Datastore directory does not exist")
-	ErrShardingFileMissing = errors.New("SHARDING file not found in datastore")
+	ErrShardingFileMissing   = errors.New("SHARDING file not found in datastore")
 )
 
 const IPFS_DEF_SHARD = "/repo/flatfs/shard/v1/next-to-last/2"

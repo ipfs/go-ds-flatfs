@@ -38,21 +38,20 @@ func ParseShardFunc(str string) (*ShardIdV1, error) {
 		}
 		str = trimmed
 	}
+
 	parts := strings.Split(str, "/")
-	if len(parts) == 3 {
-		version := parts[0]
-		if version != "v1" {
-			return nil, fmt.Errorf("expected 'v1' for version string got: %s\n", version)
-		}
-		parts = parts[1:]
-	}
-	if len(parts) != 2 {
+	if len(parts) != 3 {
 		return nil, fmt.Errorf("invalid shard identifier: %s", str)
 	}
 
-	id := &ShardIdV1{funName: parts[0]}
+	version := parts[0]
+	if version != "v1" {
+		return nil, fmt.Errorf("expected 'v1' for version string got: %s\n", version)
+	}
 
-	param, err := strconv.Atoi(parts[1])
+	id := &ShardIdV1{funName: parts[1]}
+
+	param, err := strconv.Atoi(parts[2])
 	if err != nil {
 		return nil, fmt.Errorf("invalid parameter: %v", err)
 	}

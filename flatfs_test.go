@@ -33,16 +33,16 @@ func tempdir(t testing.TB) (path string, cleanup func()) {
 }
 
 func tryAllShardFuncs(t *testing.T, testFunc func(string, *testing.T)) {
-	t.Run("prefix", func(t *testing.T) { testFunc("prefix", t) })
-	t.Run("suffix", func(t *testing.T) { testFunc("suffix", t) })
-	t.Run("next-to-last", func(t *testing.T) { testFunc("next-to-last", t) })
+	t.Run("prefix", func(t *testing.T) { testFunc("v1/prefix", t) })
+	t.Run("suffix", func(t *testing.T) { testFunc("v1/suffix", t) })
+	t.Run("next-to-last", func(t *testing.T) { testFunc("v1/next-to-last", t) })
 }
 
 func TestPutBadValueType(t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.CreateOrOpen(temp, "prefix/2", false)
+	fs, err := flatfs.CreateOrOpen(temp, "v1/prefix/2", false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -454,7 +454,7 @@ func TestNoCluster(t *testing.T) {
 	tempdir, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.CreateOrOpen(tempdir, "next-to-last/1", false)
+	fs, err := flatfs.CreateOrOpen(tempdir, "v1/next-to-last/1", false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
