@@ -73,13 +73,12 @@ func ParseShardFunc(str string) (*ShardIdV1, error) {
 	if len(str) == 0 {
 		return nil, fmt.Errorf("empty shard identifier")
 	}
-	if str[0] == '/' {
-		trimmed := strings.TrimPrefix(str, PREFIX)
-		if str == trimmed { // nothing trimmed
-			return nil, fmt.Errorf("invalid prefix in shard identifier: %s", str)
-		}
-		str = trimmed
+
+	trimmed := strings.TrimPrefix(str, PREFIX)
+	if str == trimmed { // nothing trimmed
+		return nil, fmt.Errorf("invalid or no prefix in shard identifier: %s", str)
 	}
+	str = trimmed
 
 	parts := strings.Split(str, "/")
 	if len(parts) != 3 {
