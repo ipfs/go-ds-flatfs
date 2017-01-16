@@ -9,15 +9,19 @@ import (
 	"strings"
 )
 
+var IPFS_DEF_SHARD = NextToLast(2)
+var IPFS_DEF_SHARD_STR = IPFS_DEF_SHARD.String()
+
+const PREFIX = "/repo/flatfs/shard/"
+
+const SHARDING_FN = "SHARDING"
+const README_FN = "README"
+
 type ShardIdV1 struct {
 	funName string
 	param   int
 	fun     ShardFunc
 }
-
-const PREFIX = "/repo/flatfs/shard/"
-const SHARDING_FN = "SHARDING"
-const README_FN = "README"
 
 func (f *ShardIdV1) String() string {
 	return fmt.Sprintf("%sv1/%s/%d", PREFIX, f.funName, f.param)
@@ -27,9 +31,45 @@ func (f *ShardIdV1) Func() ShardFunc {
 	return f.fun
 }
 
+func Prefix(prefixLen int) *ShardIdV1 {
+	padding := strings.Repeat("_", prefixLen)
+	return &ShardIdV1{
+		funName: "prefix",
+		param:   prefixLen,
+		fun: func(noslash string) string {
+			return (noslash + padding)[:prefixLen]
+		},
+	}
+}
+
+func Suffix(suffixLen int) *ShardIdV1 {
+	padding := strings.Repeat("_", suffixLen)
+	return &ShardIdV1{
+		funName: "suffix",
+		param:   suffixLen,
+		fun: func(noslash string) string {
+			str := padding + noslash
+			return str[len(str)-suffixLen:]
+		},
+	}
+}
+
+func NextToLast(suffixLen int) *ShardIdV1 {
+	padding := strings.Repeat("_", suffixLen+1)
+	return &ShardIdV1{
+		funName: "next-to-last",
+		param:   suffixLen,
+		fun: func(noslash string) string {
+			str := padding + noslash
+			offset := len(str) - suffixLen - 1
+			return str[offset : offset+suffixLen]
+		},
+	}
+}
+
 func ParseShardFunc(str string) (*ShardIdV1, error) {
 	str = strings.TrimSpace(str)
-	// ignore prefix for now
+
 	if len(str) == 0 {
 		return nil, fmt.Errorf("empty shard identifier")
 	}
@@ -103,40 +143,4 @@ func WriteReadme(dir string, id *ShardIdV1) error {
 		}
 	}
 	return nil
-}
-
-func Prefix(prefixLen int) *ShardIdV1 {
-	padding := strings.Repeat("_", prefixLen)
-	return &ShardIdV1{
-		funName: "prefix",
-		param:   prefixLen,
-		fun: func(noslash string) string {
-			return (noslash + padding)[:prefixLen]
-		},
-	}
-}
-
-func Suffix(suffixLen int) *ShardIdV1 {
-	padding := strings.Repeat("_", suffixLen)
-	return &ShardIdV1{
-		funName: "suffix",
-		param:   suffixLen,
-		fun: func(noslash string) string {
-			str := padding + noslash
-			return str[len(str)-suffixLen:]
-		},
-	}
-}
-
-func NextToLast(suffixLen int) *ShardIdV1 {
-	padding := strings.Repeat("_", suffixLen+1)
-	return &ShardIdV1{
-		funName: "next-to-last",
-		param:   suffixLen,
-		fun: func(noslash string) string {
-			str := padding + noslash
-			offset := len(str) - suffixLen - 1
-			return str[offset : offset+suffixLen]
-		},
-	}
 }

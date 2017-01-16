@@ -36,18 +36,15 @@ type Datastore struct {
 	sync bool
 }
 
-var _ datastore.Datastore = (*Datastore)(nil)
-
 type ShardFunc func(string) string
+
+var _ datastore.Datastore = (*Datastore)(nil)
 
 var (
 	ErrDatastoreExists       = errors.New("datastore already exist")
 	ErrDatastoreDoesNotExist = errors.New("datastore directory does not exist")
 	ErrShardingFileMissing   = fmt.Errorf("%s file not found in datastore", SHARDING_FN)
 )
-
-var IPFS_DEF_SHARD = NextToLast(2)
-var IPFS_DEF_SHARD_STR = IPFS_DEF_SHARD.String()
 
 func Create(path string, fun *ShardIdV1) error {
 
