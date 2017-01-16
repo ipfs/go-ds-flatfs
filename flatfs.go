@@ -29,8 +29,8 @@ const (
 type Datastore struct {
 	path string
 
-	shardFunc string
-	getDir    ShardFunc
+	shardStr string
+	getDir   ShardFunc
 
 	// sychronize all writes and directory changes for added safety
 	sync bool
@@ -46,17 +46,13 @@ var (
 	ErrShardingFileMissing   = fmt.Errorf("%s file not found in datastore", SHARDING_FN)
 )
 
-const IPFS_DEF_SHARD = "/repo/flatfs/shard/v1/next-to-last/2"
+var IPFS_DEF_SHARD = NextToLast(2)
+var IPFS_DEF_SHARD_STR = IPFS_DEF_SHARD.String()
 
-func Create(path string, funStr string) error {
+func Create(path string, fun *ShardIdV1) error {
 
 	err := os.Mkdir(path, 0777)
 	if err != nil && !os.IsExist(err) {
-		return err
-	}
-
-	fun, err := ParseShardFunc(funStr)
-	if err != nil {
 		return err
 	}
 
@@ -102,16 +98,16 @@ func Open(path string, sync bool) (*Datastore, error) {
 	}
 
 	fs := &Datastore{
-		path:      path,
-		shardFunc: shardId.String(),
-		getDir:    shardId.Func(),
-		sync:      sync,
+		path:     path,
+		shardStr: shardId.String(),
+		getDir:   shardId.Func(),
+		sync:     sync,
 	}
 	return fs, nil
 }
 
 // convenience method
-func CreateOrOpen(path string, fun string, sync bool) (*Datastore, error) {
+func CreateOrOpen(path string, fun *ShardIdV1, sync bool) (*Datastore, error) {
 	err := Create(path, fun)
 	if err != nil && err != ErrDatastoreExists {
 		return nil, err
@@ -119,8 +115,8 @@ func CreateOrOpen(path string, fun string, sync bool) (*Datastore, error) {
 	return Open(path, sync)
 }
 
-func (fs *Datastore) ShardFunc() string {
-	return fs.shardFunc
+func (fs *Datastore) ShardStr() string {
+	return fs.shardStr
 }
 
 func (fs *Datastore) encode(key datastore.Key) (dir, file string) {
