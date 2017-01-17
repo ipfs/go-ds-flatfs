@@ -185,9 +185,9 @@ func testStorage(p *params, t *testing.T) {
 			return err
 		}
 		switch path {
-		case ".", "..", flatfs.SHARDING_FN:
+		case ".", "..", "SHARDING":
 			// ignore
-		case flatfs.README_FN:
+		case "_README":
 			_, err := ioutil.ReadFile(absPath)
 			if err != nil {
 				t.Error("could not read _README file")

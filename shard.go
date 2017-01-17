@@ -15,7 +15,7 @@ var IPFS_DEF_SHARD_STR = IPFS_DEF_SHARD.String()
 const PREFIX = "/repo/flatfs/shard/"
 
 const SHARDING_FN = "SHARDING"
-const README_FN = "README"
+const README_FN = "_README"
 
 type ShardIdV1 struct {
 	funName string
