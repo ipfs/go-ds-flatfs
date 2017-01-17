@@ -42,7 +42,7 @@ func TestPutBadValueType(t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, flatfs.Prefix(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, flatfs.Prefix(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -53,13 +53,13 @@ func TestPutBadValueType(t *testing.T) {
 	}
 }
 
-type mkShardFunc func(int) flatfs.ShardFunc
+type mkShardFunc func(int) *flatfs.ShardIdV1
 
 func testPut(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, dirFunc(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -76,7 +76,7 @@ func testGet(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, dirFunc(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -106,7 +106,7 @@ func testPutOverwrite(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, dirFunc(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -140,7 +140,7 @@ func testGetNotFoundError(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, dirFunc(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -154,10 +154,9 @@ func testGetNotFoundError(dirFunc mkShardFunc, t *testing.T) {
 func TestGetNotFoundError(t *testing.T) { tryAllShardFuncs(t, testGetNotFoundError) }
 
 type params struct {
-	what    string
-	dir     string
-	key     string
-	dirFunc mkShardFunc
+	shard *flatfs.ShardIdV1
+	dir   string
+	key   string
 }
 
 func testStorage(p *params, t *testing.T) {
@@ -165,7 +164,7 @@ func testStorage(p *params, t *testing.T) {
 	defer cleanup()
 
 	target := p.dir + string(os.PathSeparator) + p.key + ".data"
-	fs, err := flatfs.New(temp, p.dirFunc(len(p.dir)), false)
+	fs, err := flatfs.CreateOrOpen(temp, p.shard, false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -176,6 +175,7 @@ func testStorage(p *params, t *testing.T) {
 	}
 
 	seen := false
+	haveREADME := false
 	walk := func(absPath string, fi os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -185,11 +185,17 @@ func testStorage(p *params, t *testing.T) {
 			return err
 		}
 		switch path {
-		case ".", "..":
+		case ".", "..", flatfs.SHARDING_FN:
 			// ignore
+		case flatfs.README_FN:
+			_, err := ioutil.ReadFile(absPath)
+			if err != nil {
+				t.Error("could not read _README file")
+			}
+			haveREADME = true
 		case p.dir:
 			if !fi.IsDir() {
-				t.Errorf("%s directory is not a file? %v", p.what, fi.Mode())
+				t.Errorf("directory is not a file? %v", fi.Mode())
 			}
 			// we know it's there if we see the file, nothing more to
 			// do here
@@ -214,31 +220,33 @@ func testStorage(p *params, t *testing.T) {
 	if !seen {
 		t.Error("did not see the data file")
 	}
+	if fs.ShardStr() == flatfs.IPFS_DEF_SHARD_STR && !haveREADME {
+		t.Error("expected _README file")
+	} else if fs.ShardStr() != flatfs.IPFS_DEF_SHARD_STR && haveREADME {
+		t.Error("did not expect _README file")
+	}
 }
 
 func TestStorage(t *testing.T) {
 	t.Run("prefix", func(t *testing.T) {
 		testStorage(&params{
-			what:    "prefix",
-			dir:     "qu",
-			key:     "quux",
-			dirFunc: flatfs.Prefix,
+			shard: flatfs.Prefix(2),
+			dir:   "qu",
+			key:   "quux",
 		}, t)
 	})
 	t.Run("suffix", func(t *testing.T) {
 		testStorage(&params{
-			what:    "suffix",
-			dir:     "ux",
-			key:     "quux",
-			dirFunc: flatfs.Suffix,
+			shard: flatfs.Suffix(2),
+			dir:   "ux",
+			key:   "quux",
 		}, t)
 	})
 	t.Run("next-to-last", func(t *testing.T) {
 		testStorage(&params{
-			what:    "next-to-last",
-			dir:     "uu",
-			key:     "quux",
-			dirFunc: flatfs.NextToLast,
+			shard: flatfs.NextToLast(2),
+			dir:   "uu",
+			key:   "quux",
 		}, t)
 	})
 }
@@ -247,7 +255,7 @@ func testHasNotFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, dirFunc(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -267,7 +275,7 @@ func testHasFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, dirFunc(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -291,7 +299,7 @@ func testDeleteNotFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, dirFunc(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -308,7 +316,7 @@ func testDeleteFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, dirFunc(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -335,12 +343,7 @@ func testQuerySimple(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	err := ioutil.WriteFile(filepath.Join(temp, "README"), []byte("something"), 0666)
-	if err != nil {
-		t.Fatalf("WriteFile fail: %v\n", err)
-	}
-
-	fs, err := flatfs.New(temp, dirFunc(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -378,7 +381,7 @@ func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, dirFunc(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -392,7 +395,7 @@ func testBatchDelete(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, dirFunc(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -402,11 +405,62 @@ func testBatchDelete(dirFunc mkShardFunc, t *testing.T) {
 
 func TestBatchDelete(t *testing.T) { tryAllShardFuncs(t, testBatchDelete) }
 
+func TestSHARDINGFile(t *testing.T) {
+	tempdir, cleanup := tempdir(t)
+	defer cleanup()
+
+	fun := flatfs.IPFS_DEF_SHARD
+
+	err := flatfs.Create(tempdir, fun)
+	if err != nil {
+		t.Fatalf("Create: %v\n", err)
+	}
+
+	fs, err := flatfs.Open(tempdir, false)
+	if err != nil {
+		t.Fatalf("Open fail: %v\n", err)
+	}
+	if fs.ShardStr() != flatfs.IPFS_DEF_SHARD_STR {
+		t.Fatalf("Expected '%s' for shard function got '%s'", flatfs.IPFS_DEF_SHARD_STR, fs.ShardStr())
+	}
+	fs.Close()
+
+	fs, err = flatfs.CreateOrOpen(tempdir, fun, false)
+	if err != nil {
+		t.Fatalf("Could not reopen repo: %v\n", err)
+	}
+	fs.Close()
+
+	fs, err = flatfs.CreateOrOpen(tempdir, flatfs.Prefix(5), false)
+	if err == nil {
+		t.Fatalf("Was able to open repo with incompatible sharding function")
+	}
+}
+
+func TestInvalidPrefix(t *testing.T) {
+	_, err := flatfs.ParseShardFunc("/bad/prefix/v1/next-to-last/2")
+	if err == nil {
+		t.Fatalf("Expected an error while parsing a shard identifier with a bad prefix")
+	}
+}
+
+func TestNonDatastoreDir(t *testing.T) {
+	tempdir, cleanup := tempdir(t)
+	defer cleanup()
+
+	ioutil.WriteFile(filepath.Join(tempdir, "afile"), []byte("Some Content"), 0644)
+
+	err := flatfs.Create(tempdir, flatfs.NextToLast(2))
+	if err == nil {
+		t.Fatalf("Expected an error when creating a datastore in a non-empty directory")
+	}
+}
+
 func TestNoCluster(t *testing.T) {
 	tempdir, cleanup := tempdir(t)
 	defer cleanup()
 
-	fs, err := flatfs.New(tempdir, flatfs.NextToLast(1), false)
+	fs, err := flatfs.CreateOrOpen(tempdir, flatfs.NextToLast(1), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -428,12 +482,14 @@ func TestNoCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ReadDir fail: %v\n", err)
 	}
-	if len(dirs) != 32 {
-		t.Fatalf("Expected 32 directories in %s", tempdir)
-	}
 	idealFilesPerDir := float64(N) / 32.0
 	tolerance := math.Floor(idealFilesPerDir * 0.20)
+	count := 0
 	for _, dir := range dirs {
+		if dir.Name() == flatfs.SHARDING_FN || dir.Name() == flatfs.README_FN {
+			continue
+		}
+		count += 1
 		files, err := ioutil.ReadDir(filepath.Join(tempdir, dir.Name()))
 		if err != nil {
 			t.Fatalf("ReadDir fail: %v\n", err)
@@ -443,6 +499,9 @@ func TestNoCluster(t *testing.T) {
 			t.Fatalf("Dir %s has %.0f files, expected between %.f and %.f files",
 				filepath.Join(tempdir, dir.Name()), num, idealFilesPerDir-tolerance, idealFilesPerDir+tolerance)
 		}
+	}
+	if count != 32 {
+		t.Fatalf("Expected 32 directories and one file in %s", tempdir)
 	}
 }
 
@@ -461,7 +520,7 @@ func BenchmarkConsecutivePut(b *testing.B) {
 	temp, cleanup := tempdir(b)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, flatfs.Prefix(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, flatfs.Prefix(2), false)
 	if err != nil {
 		b.Fatalf("New fail: %v\n", err)
 	}
@@ -491,7 +550,7 @@ func BenchmarkBatchedPut(b *testing.B) {
 	temp, cleanup := tempdir(b)
 	defer cleanup()
 
-	fs, err := flatfs.New(temp, flatfs.Prefix(2), false)
+	fs, err := flatfs.CreateOrOpen(temp, flatfs.Prefix(2), false)
 	if err != nil {
 		b.Fatalf("New fail: %v\n", err)
 	}

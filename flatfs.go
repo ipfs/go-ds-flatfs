@@ -5,6 +5,7 @@ package flatfs
 
 import (
 	"errors"
+	"fmt"
 	"io/ioutil"
 	"os"
 	"path"
@@ -28,47 +29,91 @@ const (
 type Datastore struct {
 	path string
 
-	getDir ShardFunc
+	shardStr string
+	getDir   ShardFunc
 
 	// sychronize all writes and directory changes for added safety
 	sync bool
 }
 
-var _ datastore.Datastore = (*Datastore)(nil)
-
 type ShardFunc func(string) string
 
-func New(path string, getDir ShardFunc, sync bool) (*Datastore, error) {
+var _ datastore.Datastore = (*Datastore)(nil)
+
+var (
+	ErrDatastoreExists       = errors.New("datastore already exist")
+	ErrDatastoreDoesNotExist = errors.New("datastore directory does not exist")
+	ErrShardingFileMissing   = fmt.Errorf("%s file not found in datastore", SHARDING_FN)
+)
+
+func Create(path string, fun *ShardIdV1) error {
+
+	err := os.Mkdir(path, 0777)
+	if err != nil && !os.IsExist(err) {
+		return err
+	}
+
+	dsFun, err := ReadShardFunc(path)
+	switch err {
+	case ErrShardingFileMissing:
+		isEmpty, err := DirIsEmpty(path)
+		if err != nil {
+			return err
+		}
+		if !isEmpty {
+			return fmt.Errorf("directory missing %s file: %s", SHARDING_FN, path)
+		}
+
+		err = WriteShardFunc(path, fun)
+		if err != nil {
+			return err
+		}
+		err = WriteReadme(path, fun)
+		return err
+	case nil:
+		if fun.String() != dsFun.String() {
+			return fmt.Errorf("specified shard func '%s' does not match repo shard func '%s'",
+				fun.String(), dsFun.String())
+		}
+		return ErrDatastoreExists
+	default:
+		return err
+	}
+}
+
+func Open(path string, sync bool) (*Datastore, error) {
+	_, err := os.Stat(path)
+	if os.IsNotExist(err) {
+		return nil, ErrDatastoreDoesNotExist
+	} else if err != nil {
+		return nil, err
+	}
+
+	shardId, err := ReadShardFunc(path)
+	if err != nil {
+		return nil, err
+	}
+
 	fs := &Datastore{
-		path:   path,
-		getDir: getDir,
-		sync:   sync,
+		path:     path,
+		shardStr: shardId.String(),
+		getDir:   shardId.Func(),
+		sync:     sync,
 	}
 	return fs, nil
 }
 
-func Prefix(prefixLen int) ShardFunc {
-	padding := strings.Repeat("_", prefixLen)
-	return func(noslash string) string {
-		return (noslash + padding)[:prefixLen]
+// convenience method
+func CreateOrOpen(path string, fun *ShardIdV1, sync bool) (*Datastore, error) {
+	err := Create(path, fun)
+	if err != nil && err != ErrDatastoreExists {
+		return nil, err
 	}
+	return Open(path, sync)
 }
 
-func Suffix(suffixLen int) ShardFunc {
-	padding := strings.Repeat("_", suffixLen)
-	return func(noslash string) string {
-		str := padding + noslash
-		return str[len(str)-suffixLen:]
-	}
-}
-
-func NextToLast(suffixLen int) ShardFunc {
-	padding := strings.Repeat("_", suffixLen+1)
-	return func(noslash string) string {
-		str := padding + noslash
-		offset := len(str) - suffixLen - 1
-		return str[offset : offset+suffixLen]
-	}
+func (fs *Datastore) ShardStr() string {
+	return fs.shardStr
 }
 
 func (fs *Datastore) encode(key datastore.Key) (dir, file string) {
