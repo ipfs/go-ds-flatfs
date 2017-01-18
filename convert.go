@@ -28,7 +28,14 @@ func UpgradeV0toV1(path string, prefixLen int) error {
 }
 
 func DowngradeV1toV0(path string) error {
-	err := os.Remove(filepath.Join(path, SHARDING_FN))
+	fun, err := ReadShardFunc(path)
+	if err != nil {
+		return err
+	} else if fun.funName != "prefix" {
+		return fmt.Errorf("%s: can only downgrade datastore that use the 'prefix' sharding function", path)
+	}
+
+	err = os.Remove(filepath.Join(path, SHARDING_FN))
 	if err != nil {
 		return err
 	}

@@ -121,7 +121,7 @@ func ReadShardFunc(dir string) (*ShardIdV1, error) {
 }
 
 func WriteShardFunc(dir string, id *ShardIdV1) error {
-	file, err := os.Create(filepath.Join(dir, SHARDING_FN))
+	file, err := os.OpenFile(filepath.Join(dir, SHARDING_FN), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
 	if err != nil {
 		return err
 	}

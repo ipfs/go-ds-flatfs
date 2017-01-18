@@ -96,7 +96,7 @@ func TestMoveRestart(t *testing.T) {
 
 	// there should be nothing left in the new datastore
 	rmEmptyDatastore(t, v2dir)
-	
+
 	// try the move again, again should fail
 	createDatastore(t, v2dir, flatfs.NextToLast(2))
 	err = flatfs.Move(v1dir, v2dir, nil)
@@ -139,12 +139,12 @@ func TestUpgradeDownload(t *testing.T) {
 	keys, blocks := populateDatastore(t, tempdir)
 	checkKeys(t, tempdir, keys, blocks)
 
-	//err := flatfs.UpgradeV0toV1(tempdir, 3)
-	//if err == nil {
-	//	t.Fatalf("UpgradeV0toV1 on already v1 should fail.")
-	//}
+	err := flatfs.UpgradeV0toV1(tempdir, 3)
+	if err == nil {
+		t.Fatalf("UpgradeV0toV1 on already v1 should fail.")
+	}
 
-	err := flatfs.DowngradeV1toV0(tempdir)
+	err = flatfs.DowngradeV1toV0(tempdir)
 	if err != nil {
 		t.Fatalf("DowngradeV1toV0 fail: %v\n", err)
 	}
@@ -163,6 +163,18 @@ func TestUpgradeDownload(t *testing.T) {
 
 	// This will fail unless the repository is in the new version
 	checkKeys(t, tempdir, keys, blocks)
+}
+
+func TestDownloadNonPrefix(t *testing.T) {
+	tempdir, cleanup := tempdir(t)
+	defer cleanup()
+
+	createDatastore(t, tempdir, flatfs.NextToLast(2))
+
+	err := flatfs.DowngradeV1toV0(tempdir)
+	if err == nil {
+		t.Fatalf("DowngradeV1toV0 should have failed", err)
+	}
 }
 
 func createDatastore(t *testing.T, dir string, fun *flatfs.ShardIdV1) {
