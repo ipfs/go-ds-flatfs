@@ -15,7 +15,7 @@ var IPFS_DEF_SHARD_STR = IPFS_DEF_SHARD.String()
 const PREFIX = "/repo/flatfs/shard/"
 
 const SHARDING_FN = "SHARDING"
-const README_FN = "README"
+const README_FN = "_README"
 
 type ShardIdV1 struct {
 	funName string
@@ -121,7 +121,7 @@ func ReadShardFunc(dir string) (*ShardIdV1, error) {
 }
 
 func WriteShardFunc(dir string, id *ShardIdV1) error {
-	file, err := os.Create(filepath.Join(dir, SHARDING_FN))
+	file, err := os.OpenFile(filepath.Join(dir, SHARDING_FN), os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0666)
 	if err != nil {
 		return err
 	}

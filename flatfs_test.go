@@ -9,13 +9,12 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/query"
 	dstest "github.com/ipfs/go-datastore/test"
 	"github.com/ipfs/go-ds-flatfs"
-
-	randbo "github.com/dustin/randbo"
 )
 
 func tempdir(t testing.TB) (path string, cleanup func()) {
@@ -185,9 +184,9 @@ func testStorage(p *params, t *testing.T) {
 			return err
 		}
 		switch path {
-		case ".", "..", flatfs.SHARDING_FN:
+		case ".", "..", "SHARDING":
 			// ignore
-		case flatfs.README_FN:
+		case "_README":
 			_, err := ioutil.ReadFile(absPath)
 			if err != nil {
 				t.Error("could not read _README file")
@@ -465,7 +464,7 @@ func TestNoCluster(t *testing.T) {
 		t.Fatalf("New fail: %v\n", err)
 	}
 
-	r := randbo.NewFrom(rand.NewSource(0))
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	N := 3200 // should be divisible by 32 so the math works out
 	for i := 0; i < N; i++ {
 		blk := make([]byte, 1000)
@@ -483,7 +482,7 @@ func TestNoCluster(t *testing.T) {
 		t.Fatalf("ReadDir fail: %v\n", err)
 	}
 	idealFilesPerDir := float64(N) / 32.0
-	tolerance := math.Floor(idealFilesPerDir * 0.20)
+	tolerance := math.Floor(idealFilesPerDir * 0.50)
 	count := 0
 	for _, dir := range dirs {
 		if dir.Name() == flatfs.SHARDING_FN || dir.Name() == flatfs.README_FN {
@@ -506,7 +505,7 @@ func TestNoCluster(t *testing.T) {
 }
 
 func BenchmarkConsecutivePut(b *testing.B) {
-	r := randbo.New()
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	var blocks [][]byte
 	var keys []datastore.Key
 	for i := 0; i < b.N; i++ {
@@ -536,7 +535,7 @@ func BenchmarkConsecutivePut(b *testing.B) {
 }
 
 func BenchmarkBatchedPut(b *testing.B) {
-	r := randbo.New()
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	var blocks [][]byte
 	var keys []datastore.Key
 	for i := 0; i < b.N; i++ {
