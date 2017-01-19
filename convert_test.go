@@ -4,15 +4,14 @@ import (
 	"bytes"
 	"encoding/hex"
 	"io/ioutil"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-ds-flatfs"
-	//"gx/ipfs/QmRWDav6mzWseLWeYfVd5fvUKiVe9xNH29YfMF438fG364/go-datastore/query"
-
-	rand "github.com/dustin/randbo"
 )
 
 func TestMove(t *testing.T) {
@@ -197,7 +196,7 @@ func populateDatastore(t *testing.T, dir string) ([]datastore.Key, [][]byte) {
 		t.Fatalf("Open fail: %v\n", err)
 	}
 
-	r := rand.New()
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	var blocks [][]byte
 	var keys []datastore.Key
 	for i := 0; i < 256; i++ {
