@@ -464,7 +464,7 @@ func TestNoCluster(t *testing.T) {
 		t.Fatalf("New fail: %v\n", err)
 	}
 
-	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	r := rand.New(rand.NewSource(0))
 	N := 3200 // should be divisible by 32 so the math works out
 	for i := 0; i < N; i++ {
 		blk := make([]byte, 1000)
@@ -482,7 +482,7 @@ func TestNoCluster(t *testing.T) {
 		t.Fatalf("ReadDir fail: %v\n", err)
 	}
 	idealFilesPerDir := float64(N) / 32.0
-	tolerance := math.Floor(idealFilesPerDir * 0.50)
+	tolerance := math.Floor(idealFilesPerDir * 0.25)
 	count := 0
 	for _, dir := range dirs {
 		if dir.Name() == flatfs.SHARDING_FN || dir.Name() == flatfs.README_FN {
