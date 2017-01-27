@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
-	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -118,13 +117,13 @@ func (fs *Datastore) ShardStr() string {
 
 func (fs *Datastore) encode(key datastore.Key) (dir, file string) {
 	noslash := key.String()[1:]
-	dir = path.Join(fs.path, fs.getDir(noslash))
-	file = path.Join(dir, noslash+extension)
+	dir = filepath.Join(fs.path, fs.getDir(noslash))
+	file = filepath.Join(dir, noslash+extension)
 	return dir, file
 }
 
 func (fs *Datastore) decode(file string) (key datastore.Key, ok bool) {
-	if path.Ext(file) != extension {
+	if filepath.Ext(file) != extension {
 		return datastore.Key{}, false
 	}
 	name := file[:len(file)-len(extension)]
