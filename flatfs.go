@@ -47,7 +47,7 @@ var (
 
 func Create(path string, fun *ShardIdV1) error {
 
-	err := os.Mkdir(path, 0777)
+	err := os.Mkdir(path, 0755)
 	if err != nil && !os.IsExist(err) {
 		return err
 	}
@@ -148,7 +148,7 @@ func (fs *Datastore) makeDir(dir string) error {
 }
 
 func (fs *Datastore) makeDirNoSync(dir string) error {
-	if err := os.Mkdir(dir, 0777); err != nil {
+	if err := os.Mkdir(dir, 0755); err != nil {
 		// EEXIST is safe to ignore here, that just means the prefix
 		// directory already existed.
 		if !os.IsExist(err) {
