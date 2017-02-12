@@ -150,7 +150,7 @@ func Move(oldPath string, newPath string, out io.Writer) error {
 			}
 		} else {
 			// else we found something unexpected, so to be safe just move it
-			log.Warningf("found unexpected file in datastore directory: \"%s\", moving anyway", fn)
+			log.Warningf("found unexpected file in datastore directory: \"%s\", moving anyway\n", fn)
 			newPath := filepath.Join(newDS.path, fn)
 			err := osrename.Rename(oldPath, newPath)
 			if err != nil {
