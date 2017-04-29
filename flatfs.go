@@ -189,7 +189,7 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 		return err
 	}
 
-	tmp, err := ioutil.TempFile(dir, "put-")
+	tmp, err := TempFile(dir, "put-")
 	if err != nil {
 		return err
 	}
@@ -248,7 +248,7 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 		}
 		dirsToSync = append(dirsToSync, dir)
 
-		tmp, err := ioutil.TempFile(dir, "put-")
+		tmp, err := TempFile(dir, "put-")
 		if err != nil {
 			return err
 		}
