@@ -71,6 +71,39 @@ func testPut(dirFunc mkShardFunc, t *testing.T) {
 
 func TestPut(t *testing.T) { tryAllShardFuncs(t, testPut) }
 
+func testPutGetNamespaces(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	key := datastore.NewKey("/q/u/u/x")
+	input := "foobar"
+
+	err = fs.Put(key, []byte(input))
+	if err != nil {
+		t.Fatalf("Put fail: %v\n", err)
+	}
+
+	data, err := fs.Get(key)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	buf, ok := data.([]byte)
+	if !ok {
+		t.Fatalf("expected []byte from Get, got %T: %v", data, data)
+	}
+
+	if g, e := string(buf), input; g != e {
+		t.Fatalf("Get gave wrong content: %q != %q", g, e)
+	}
+}
+
+func TestPutGetNamespaces(t *testing.T) { tryAllShardFuncs(t, testPutGetNamespaces) }
+
 func testGet(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()

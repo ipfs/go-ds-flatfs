@@ -116,8 +116,11 @@ func (fs *Datastore) ShardStr() string {
 }
 
 func (fs *Datastore) encode(key datastore.Key) (dir, file string) {
+	fmt.Printf("key: %s\n", key.String())
 	noslash := key.String()[1:]
 	dir = filepath.Join(fs.path, fs.getDir(noslash))
+	fmt.Printf("getDir: %s\n", fs.getDir(noslash))
+	fmt.Printf("noslash: %s\n", noslash)
 	file = filepath.Join(dir, noslash+extension)
 	return dir, file
 }
