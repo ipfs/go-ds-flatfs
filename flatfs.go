@@ -432,7 +432,7 @@ func (fs *Datastore) walk(path string, reschan chan query.Result) error {
 
 		key, ok := fs.decode(fn)
 		if !ok {
-			log.Warning("failed to decode entry in flatfs")
+			log.Warningf("failed to decode flatfs entry: %s", fn)
 			continue
 		}
 
