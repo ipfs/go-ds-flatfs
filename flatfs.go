@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/ipfs/go-datastore"
@@ -22,7 +23,8 @@ import (
 var log = logging.Logger("flatfs")
 
 const (
-	extension = ".data"
+	extension      = ".data"
+	diskUsageChCap = 1024
 )
 
 type Datastore struct {
@@ -33,6 +35,9 @@ type Datastore struct {
 
 	// sychronize all writes and directory changes for added safety
 	sync bool
+
+	diskUsage   uint64
+	diskUsageCh chan int64
 }
 
 type ShardFunc func(string) string
@@ -94,10 +99,24 @@ func Open(path string, sync bool) (*Datastore, error) {
 	}
 
 	fs := &Datastore{
-		path:     path,
-		shardStr: shardId.String(),
-		getDir:   shardId.Func(),
-		sync:     sync,
+		path:        path,
+		shardStr:    shardId.String(),
+		getDir:      shardId.Func(),
+		sync:        sync,
+		diskUsage:   0,
+		diskUsageCh: make(chan int64, diskUsageChCap),
+	}
+
+	go fs.diskUsageUpdater()
+	// This sets diskUsage to the correct value
+	// It might be slow, but allowing it to happen
+	// while the datastore is usable might
+	// cause diskUsage to not be accurate.
+	err = fs.calculateDiskUsage()
+	if err != nil {
+		// Cannot stat() all
+		// elements in the datastore.
+		return nil, err
 	}
 	return fs, nil
 }
@@ -154,7 +173,11 @@ func (fs *Datastore) makeDirNoSync(dir string) error {
 		if !os.IsExist(err) {
 			return err
 		}
+		return nil
 	}
+
+	// Track DiskUsage of this NEW folder
+	fs.updateDiskUsage(dir, true)
 	return nil
 }
 
@@ -224,6 +247,9 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 		return err
 	}
 	removed = true
+
+	// Update diskUsage
+	fs.updateDiskUsage(path, true)
 
 	if fs.sync {
 		if err := syncDir(dir); err != nil {
@@ -300,6 +326,9 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 
 		// signify removed
 		ops[fi] = 2
+
+		// Track disk usage
+		fs.updateDiskUsage(path, true)
 	}
 
 	// now sync the dirs for those files
@@ -346,6 +375,9 @@ func (fs *Datastore) Has(key datastore.Key) (exists bool, err error) {
 
 func (fs *Datastore) Delete(key datastore.Key) error {
 	_, path := fs.encode(key)
+
+	fs.updateDiskUsage(path, false)
+
 	switch err := os.Remove(path); {
 	case err == nil:
 		return nil
@@ -404,6 +436,78 @@ func (fs *Datastore) walkTopLevel(path string, reschan chan query.Result) error 
 	return nil
 }
 
+func (fs *Datastore) calculateDiskUsage() error {
+	var du int64
+
+	err := filepath.Walk(fs.path,
+		func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+			du += info.Size()
+			return nil
+		})
+
+	if err != nil {
+		log.Errorf("cannot calculate disk usage: %s", err)
+		return err
+	}
+
+	fs.diskUsageCh <- du
+	return nil
+}
+
+// diskUsageUpdater should run in a goroutine.
+// only call after calculateDiskUsage() has stored
+// a correct value in fs.diskUsage.
+func (fs *Datastore) diskUsageUpdater() {
+	var curDu int64
+
+	for duInc := range fs.diskUsageCh {
+		curDu += duInc // duInc might be < 0
+		atomic.StoreUint64(&fs.diskUsage, uint64(curDu))
+	}
+}
+
+func fileSize(path string) int64 {
+	fi, err := os.Stat(path)
+	if err != nil {
+		return 0
+	}
+	return fi.Size()
+}
+
+// updateDiskUsage reads the size of path and sends it either
+// as an increment or a decrement to the diskUsageCh.
+func (fs *Datastore) updateDiskUsage(path string, add bool) {
+	fsize := fileSize(path)
+	if !add {
+		fsize = -fsize
+	}
+
+	if fsize != 0 {
+		fs.diskUsageCh <- fsize
+	}
+}
+
+// DiskUsage implements the PersistentDatastore interface
+// and returns the current disk usage in bytes used by
+// this datastore.
+//
+// The size is approximative and may slightly differ from
+// the real disk values.
+func (fs *Datastore) DiskUsage() (uint64, error) {
+	// it may differ from real disk values if
+	// the filesystem has allocated for blocks
+	// for a directory because it has many files in it
+	// we don't account for "resized" directories.
+	// In a large datastore, the differences should be
+	// are negligible though.
+
+	du := atomic.LoadUint64(&fs.diskUsage)
+	return du, nil
+}
+
 func (fs *Datastore) walk(path string, reschan chan query.Result) error {
 	dir, err := os.Open(path)
 	if err != nil {
@@ -446,6 +550,7 @@ func (fs *Datastore) walk(path string, reschan chan query.Result) error {
 }
 
 func (fs *Datastore) Close() error {
+	close(fs.diskUsageCh)
 	return nil
 }
 

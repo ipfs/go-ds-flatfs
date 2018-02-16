@@ -2,6 +2,7 @@ package flatfs_test
 
 import (
 	"encoding/base32"
+	"fmt"
 	"io/ioutil"
 	"math"
 	"math/rand"
@@ -14,6 +15,7 @@ import (
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/query"
 	dstest "github.com/ipfs/go-datastore/test"
+
 	"github.com/ipfs/go-ds-flatfs"
 )
 
@@ -375,6 +377,91 @@ func testQuerySimple(dirFunc mkShardFunc, t *testing.T) {
 }
 
 func TestQuerySimple(t *testing.T) { tryAllShardFuncs(t, testQuerySimple) }
+
+func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	t.Log(temp)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), true)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	duNew, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("duNew:", duNew)
+
+	count := 500
+	for i := 0; i < count; i++ {
+		k := datastore.NewKey(fmt.Sprintf("test-%d", i))
+		v := []byte("10bytes---")
+		err = fs.Put(k, v)
+		if err != nil {
+			t.Fatalf("Put fail: %v\n", err)
+		}
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	duElems, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("duPostPut:", duElems)
+
+	for i := 0; i < count; i++ {
+		k := datastore.NewKey(fmt.Sprintf("test-%d", i))
+		err = fs.Delete(k)
+		if err != nil {
+			t.Fatalf("Delete fail: %v\n", err)
+		}
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	duDelete, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("duPostDelete:", duDelete)
+
+	fs.Close()
+
+	// Make sure size is correctly calculated on re-open
+	fs, err = flatfs.Open(temp, true)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	duReopen, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("duReopen:", duReopen)
+
+	// Checks
+	if duNew == 0 {
+		t.Error("new datastores have some size")
+	}
+
+	if duElems <= duNew {
+		t.Error("size should grow as new elements are added")
+	}
+
+	if duElems-duDelete != uint64(count*10) {
+		t.Error("size should be reduced exactly as size of objects deleted")
+	}
+
+	if duReopen < duNew {
+		t.Error("Reopened datastore should not be smaller")
+	}
+}
+
+func TestDiskUsage(t *testing.T) {
+	tryAllShardFuncs(t, testDiskUsage)
+}
 
 func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
