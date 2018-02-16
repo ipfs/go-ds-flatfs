@@ -388,6 +388,7 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 		t.Fatalf("New fail: %v\n", err)
 	}
 
+	time.Sleep(100 * time.Millisecond)
 	duNew, err := fs.DiskUsage()
 	if err != nil {
 		t.Fatal(err)
@@ -443,7 +444,7 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 
 	// Checks
 	if duNew == 0 {
-		t.Error("new datastores have some size")
+		t.Error("new datastores should have some size")
 	}
 
 	if duElems <= duNew {

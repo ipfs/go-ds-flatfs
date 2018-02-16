@@ -9,6 +9,7 @@ import (
 	"io/ioutil"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -25,6 +26,7 @@ var log = logging.Logger("flatfs")
 const (
 	extension      = ".data"
 	diskUsageChCap = 1024
+	diskUsageFile  = "diskUsage.cache"
 )
 
 type Datastore struct {
@@ -436,9 +438,17 @@ func (fs *Datastore) walkTopLevel(path string, reschan chan query.Result) error 
 	return nil
 }
 
+// calculateDiskUsage tries to read the diskUsageFile for a cached
+// diskUsage value, otherwise walks the datastore files.
 func (fs *Datastore) calculateDiskUsage() error {
-	var du int64
+	// Try to obtain a previously stored value from disk
+	if persDu := fs.readDiskUsageFile(); persDu > 0 {
+		fs.diskUsageCh <- int64(persDu)
+		return nil
+	}
 
+	// Otherwise walk the datastore files
+	var du int64
 	err := filepath.Walk(fs.path,
 		func(path string, info os.FileInfo, err error) error {
 			if err != nil {
@@ -488,6 +498,33 @@ func (fs *Datastore) updateDiskUsage(path string, add bool) {
 	if fsize != 0 {
 		fs.diskUsageCh <- fsize
 	}
+}
+
+func (fs *Datastore) persistDiskUsageFile() {
+	// Store DiskUsage on clean shutdowns.
+	du, err := fs.DiskUsage()
+	if err != nil {
+		// do not store on errors. just ignore them
+		return
+	}
+
+	duB := []byte(fmt.Sprintf("%d", du))
+	ioutil.WriteFile(filepath.Join(fs.path, diskUsageFile), duB, 0644)
+}
+
+// deletes the diskUsageFile after reading
+func (fs *Datastore) readDiskUsageFile() uint64 {
+	fpath := filepath.Join(fs.path, diskUsageFile)
+	defer os.Remove(fpath)
+	duB, err := ioutil.ReadFile(fpath)
+	if err != nil {
+		return 0
+	}
+	i, err := strconv.ParseUint(string(duB), 10, 64)
+	if err != nil {
+		return 0
+	}
+	return i
 }
 
 // DiskUsage implements the PersistentDatastore interface
@@ -551,6 +588,7 @@ func (fs *Datastore) walk(path string, reschan chan query.Result) error {
 
 func (fs *Datastore) Close() error {
 	close(fs.diskUsageCh)
+	fs.persistDiskUsageFile()
 	return nil
 }
 
