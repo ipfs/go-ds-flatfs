@@ -24,9 +24,8 @@ import (
 var log = logging.Logger("flatfs")
 
 const (
-	extension      = ".data"
-	diskUsageChCap = 1024
-	diskUsageFile  = "diskUsage.cache"
+	extension     = ".data"
+	diskUsageFile = "diskUsage.cache"
 )
 
 type Datastore struct {
@@ -38,8 +37,7 @@ type Datastore struct {
 	// sychronize all writes and directory changes for added safety
 	sync bool
 
-	diskUsage   uint64
-	diskUsageCh chan int64
+	diskUsage int64
 }
 
 type ShardFunc func(string) string
@@ -101,15 +99,13 @@ func Open(path string, sync bool) (*Datastore, error) {
 	}
 
 	fs := &Datastore{
-		path:        path,
-		shardStr:    shardId.String(),
-		getDir:      shardId.Func(),
-		sync:        sync,
-		diskUsage:   0,
-		diskUsageCh: make(chan int64, diskUsageChCap),
+		path:      path,
+		shardStr:  shardId.String(),
+		getDir:    shardId.Func(),
+		sync:      sync,
+		diskUsage: 0,
 	}
 
-	go fs.diskUsageUpdater()
 	// This sets diskUsage to the correct value
 	// It might be slow, but allowing it to happen
 	// while the datastore is usable might
@@ -443,7 +439,7 @@ func (fs *Datastore) walkTopLevel(path string, reschan chan query.Result) error 
 func (fs *Datastore) calculateDiskUsage() error {
 	// Try to obtain a previously stored value from disk
 	if persDu := fs.readDiskUsageFile(); persDu > 0 {
-		fs.diskUsageCh <- int64(persDu)
+		atomic.StoreInt64(&fs.diskUsage, persDu)
 		return nil
 	}
 
@@ -463,20 +459,8 @@ func (fs *Datastore) calculateDiskUsage() error {
 		return err
 	}
 
-	fs.diskUsageCh <- du
+	atomic.StoreInt64(&fs.diskUsage, du)
 	return nil
-}
-
-// diskUsageUpdater should run in a goroutine.
-// only call after calculateDiskUsage() has stored
-// a correct value in fs.diskUsage.
-func (fs *Datastore) diskUsageUpdater() {
-	var curDu int64
-
-	for duInc := range fs.diskUsageCh {
-		curDu += duInc // duInc might be < 0
-		atomic.StoreUint64(&fs.diskUsage, uint64(curDu))
-	}
 }
 
 func fileSize(path string) int64 {
@@ -487,8 +471,9 @@ func fileSize(path string) int64 {
 	return fi.Size()
 }
 
-// updateDiskUsage reads the size of path and sends it either
-// as an increment or a decrement to the diskUsageCh.
+// updateDiskUsage reads the size of path and atomically
+// increases or decreases the diskUsage variable.
+// setting add to false will subtract from disk usage.
 func (fs *Datastore) updateDiskUsage(path string, add bool) {
 	fsize := fileSize(path)
 	if !add {
@@ -496,7 +481,7 @@ func (fs *Datastore) updateDiskUsage(path string, add bool) {
 	}
 
 	if fsize != 0 {
-		fs.diskUsageCh <- fsize
+		atomic.AddInt64(&fs.diskUsage, fsize)
 	}
 }
 
@@ -509,18 +494,29 @@ func (fs *Datastore) persistDiskUsageFile() {
 	}
 
 	duB := []byte(fmt.Sprintf("%d", du))
-	ioutil.WriteFile(filepath.Join(fs.path, diskUsageFile), duB, 0644)
+	tmp, err := ioutil.TempFile(fs.path, "du-")
+	if err != nil {
+		return
+	}
+	if _, err := tmp.Write(duB); err != nil {
+		return
+	}
+	if err := tmp.Close(); err != nil {
+		return
+	}
+
+	osrename.Rename(tmp.Name(), filepath.Join(fs.path, diskUsageFile))
 }
 
 // deletes the diskUsageFile after reading
-func (fs *Datastore) readDiskUsageFile() uint64 {
+func (fs *Datastore) readDiskUsageFile() int64 {
 	fpath := filepath.Join(fs.path, diskUsageFile)
 	defer os.Remove(fpath)
 	duB, err := ioutil.ReadFile(fpath)
 	if err != nil {
 		return 0
 	}
-	i, err := strconv.ParseUint(string(duB), 10, 64)
+	i, err := strconv.ParseInt(string(duB), 10, 64)
 	if err != nil {
 		return 0
 	}
@@ -541,8 +537,8 @@ func (fs *Datastore) DiskUsage() (uint64, error) {
 	// In a large datastore, the differences should be
 	// are negligible though.
 
-	du := atomic.LoadUint64(&fs.diskUsage)
-	return du, nil
+	du := atomic.LoadInt64(&fs.diskUsage)
+	return uint64(du), nil
 }
 
 func (fs *Datastore) walk(path string, reschan chan query.Result) error {
@@ -587,7 +583,6 @@ func (fs *Datastore) walk(path string, reschan chan query.Result) error {
 }
 
 func (fs *Datastore) Close() error {
-	close(fs.diskUsageCh)
 	fs.persistDiskUsageFile()
 	return nil
 }
