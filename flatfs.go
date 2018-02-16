@@ -246,7 +246,6 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 	}
 	removed = true
 
-	// Update diskUsage
 	fs.updateDiskUsage(path, true)
 
 	if fs.sync {
@@ -325,7 +324,6 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 		// signify removed
 		ops[fi] = 2
 
-		// Track disk usage
 		fs.updateDiskUsage(path, true)
 	}
 
@@ -374,6 +372,8 @@ func (fs *Datastore) Has(key datastore.Key) (exists bool, err error) {
 func (fs *Datastore) Delete(key datastore.Key) error {
 	_, path := fs.encode(key)
 
+	// when removing an unexisting file
+	// this does nothing.
 	fs.updateDiskUsage(path, false)
 
 	switch err := os.Remove(path); {
