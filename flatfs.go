@@ -181,6 +181,8 @@ func (fs *Datastore) makeDirNoSync(dir string) error {
 
 var putMaxRetries = 6
 
+// Put stores a key/value in the datastore. Note that it does not replace
+// already existing values. If you wish to replace a value, do a Delete first.
 func (fs *Datastore) Put(key datastore.Key, value interface{}) error {
 	val, ok := value.([]byte)
 	if !ok {
