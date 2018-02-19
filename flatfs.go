@@ -240,8 +240,16 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 	}
 	closed = true
 
-	err = osrename.Rename(tmp.Name(), path)
-	if err != nil {
+	if err := os.Link(tmp.Name(), path); err != nil {
+		if os.IsExist(err) {
+			// Exit cleanly. Note: deferred function will remove
+			// the temp file and we don't need sync.
+			return nil
+		}
+		return err
+	}
+
+	if err := os.Remove(tmp.Name()); err != nil {
 		return err
 	}
 	removed = true
@@ -317,7 +325,16 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 
 	// move files to their proper places
 	for fi, path := range files {
-		if err := osrename.Rename(fi.Name(), path); err != nil {
+		if err := os.Link(fi.Name(), path); err != nil {
+			if os.IsExist(err) {
+				// Deferred function will take care of
+				// removing temp file
+				continue
+			}
+			return err
+		}
+
+		if err := os.Remove(fi.Name()); err != nil {
 			return err
 		}
 
@@ -372,12 +389,11 @@ func (fs *Datastore) Has(key datastore.Key) (exists bool, err error) {
 func (fs *Datastore) Delete(key datastore.Key) error {
 	_, path := fs.encode(key)
 
-	// when removing an unexisting file
-	// this does nothing.
-	fs.updateDiskUsage(path, false)
+	fSize := fileSize(path)
 
 	switch err := os.Remove(path); {
 	case err == nil:
+		atomic.AddInt64(&fs.diskUsage, -fSize)
 		return nil
 	case os.IsNotExist(err):
 		return datastore.ErrNotFound

@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -462,6 +464,88 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 
 func TestDiskUsage(t *testing.T) {
 	tryAllShardFuncs(t, testDiskUsage)
+}
+
+func TestDiskUsageDoubleCount(t *testing.T) {
+	tryAllShardFuncs(t, testDiskUsageDoubleCount)
+}
+
+// test that concurrently writing and deleting the same key/value
+// does not throw any errors and disk usage does not do
+// any double-counting.
+func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+
+	// This test fails with no sync and deletes activated
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), true)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	var count int
+	var wg sync.WaitGroup
+	testKey := datastore.NewKey("test")
+
+	put := func() {
+		defer wg.Done()
+		for i := 0; i < count; i++ {
+			//fmt.Println("put")
+			v := []byte("10bytes---")
+			err := fs.Put(testKey, v)
+			if err != nil {
+				t.Fatalf("Put fail: %v\n", err)
+			}
+		}
+	}
+
+	del := func() {
+		defer wg.Done()
+		for i := 0; i < count; i++ {
+			//fmt.Println("del")
+			err := fs.Delete(testKey)
+			if err != nil && !strings.Contains(err.Error(), "key not found") {
+				t.Fatalf("Delete fail: %v\n", err)
+			}
+		}
+	}
+
+	// Add one element and then remove it and check disk usage
+	// makes sense
+	count = 1
+	wg.Add(2)
+	put()
+	du, _ := fs.DiskUsage()
+	del()
+	du2, _ := fs.DiskUsage()
+	if du-10 != du2 {
+		t.Error("should have deleted exactly 10 bytes:", du, du2)
+	}
+
+	// Add and remove many times at the same time
+	count = 1000
+	wg.Add(4)
+	go put()
+	go del()
+	go put()
+	go del()
+	wg.Wait()
+
+	du3, _ := fs.DiskUsage()
+	has, err := fs.Has(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if has { // put came last
+		if du3 != du {
+			t.Error("du should be the same as after first put:", du, du3)
+		}
+	} else { //delete came last
+		if du3 != du2 {
+			t.Error("du should be the same as after first delete:", du2, du3)
+		}
+	}
 }
 
 func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
