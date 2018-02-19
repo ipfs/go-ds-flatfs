@@ -137,7 +137,7 @@ func testPutOverwrite(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
-func TestPutOverwrite(t *testing.T) { tryAllShardFuncs(t, testPutOverwrite) }
+//func TestPutOverwrite(t *testing.T) { tryAllShardFuncs(t, testPutOverwrite) }
 
 func testGetNotFoundError(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
