@@ -520,7 +520,7 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// Add and remove many times at the same time
-	count = 1000
+	count = 500
 	wg.Add(4)
 	go put()
 	go del()
@@ -556,7 +556,7 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 
 	fsBatch, _ := fs.Batch()
 
-	count := 1000
+	count := 500
 	var wg sync.WaitGroup
 	testKeys := []datastore.Key{}
 	for i := 0; i < count; i++ {
