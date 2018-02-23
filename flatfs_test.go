@@ -137,7 +137,7 @@ func testPutOverwrite(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
-//func TestPutOverwrite(t *testing.T) { tryAllShardFuncs(t, testPutOverwrite) }
+func TestPutOverwrite(t *testing.T) { tryAllShardFuncs(t, testPutOverwrite) }
 
 func testGetNotFoundError(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
@@ -218,7 +218,7 @@ func testStorage(p *params, t *testing.T) {
 		return nil
 	}
 	if err := filepath.Walk(temp, walk); err != nil {
-		t.Fatal("walk: %v", err)
+		t.Fatalf("walk: %v", err)
 	}
 	if !seen {
 		t.Error("did not see the data file")
@@ -385,7 +385,7 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	t.Log(temp)
 	defer cleanup()
 
-	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), true)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -477,8 +477,7 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
 
-	// This test fails with no sync and deletes activated
-	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), true)
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
@@ -490,7 +489,6 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 	put := func() {
 		defer wg.Done()
 		for i := 0; i < count; i++ {
-			//fmt.Println("put")
 			v := []byte("10bytes---")
 			err := fs.Put(testKey, v)
 			if err != nil {
@@ -502,7 +500,6 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 	del := func() {
 		defer wg.Done()
 		for i := 0; i < count; i++ {
-			//fmt.Println("del")
 			err := fs.Delete(testKey)
 			if err != nil && !strings.Contains(err.Error(), "key not found") {
 				t.Fatalf("Delete fail: %v\n", err)
@@ -547,6 +544,87 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 		}
 	}
 }
+
+func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	fsBatch, _ := fs.Batch()
+
+	count := 1000
+	var wg sync.WaitGroup
+	testKeys := []datastore.Key{}
+	for i := 0; i < count; i++ {
+		k := datastore.NewKey(fmt.Sprintf("test%d", i))
+		testKeys = append(testKeys, k)
+	}
+
+	put := func() {
+		for i := 0; i < count; i++ {
+			fsBatch.Put(testKeys[i], []byte("10bytes---"))
+		}
+	}
+	commit := func() {
+		defer wg.Done()
+		err := fsBatch.Commit()
+		if err != nil {
+			t.Fatalf("Batch Put fail: %v\n", err)
+		}
+	}
+
+	del := func() {
+		defer wg.Done()
+		for _, k := range testKeys {
+			err := fs.Delete(k)
+			if err != nil && !strings.Contains(err.Error(), "key not found") {
+				t.Fatalf("Delete fail: %v\n", err)
+			}
+		}
+	}
+
+	// Put many elements and then delete them and check disk usage
+	// makes sense
+	wg.Add(2)
+	put()
+	commit()
+	du, _ := fs.DiskUsage()
+	del()
+	du2, _ := fs.DiskUsage()
+	if du-uint64(10*count) != du2 {
+		t.Errorf("should have deleted exactly %d bytes: %d %d", 10*count, du, du2)
+	}
+
+	// Do deletes while doing putManys concurrently
+	wg.Add(2)
+	put()
+	go commit()
+	go del()
+	wg.Wait()
+
+	du3, _ := fs.DiskUsage()
+	// Now query how many keys we have
+	results, err := fs.Query(query.Query{
+		KeysOnly: true,
+	})
+	rest, err := results.Rest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedSize := uint64(len(rest) * 10)
+
+	if exp := du2 + expectedSize; exp != du3 {
+		t.Error("diskUsage has skewed off from real size:",
+			exp, du3)
+	}
+}
+
+func TestDiskUsageBatch(t *testing.T) { tryAllShardFuncs(t, testDiskUsageBatch) }
 
 func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)

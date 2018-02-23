@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -28,6 +29,27 @@ const (
 	diskUsageFile = "diskUsage.cache"
 )
 
+const (
+	putOp = iota
+	deleteOp
+	renameOp
+)
+
+type opT int
+
+// op wraps useful arguments of write operations
+type op struct {
+	typ  opT           // operation type
+	key  datastore.Key // datastore key. Mandatory.
+	tmp  string        // temp file path
+	path string        // file path
+	v    []byte        // value
+}
+
+// Datastore implements the go-datastore Interface.
+// Note this datastore cannot guarantee order of concurrent
+// write operations to the same key. See the explanation in
+// Put().
 type Datastore struct {
 	path string
 
@@ -38,6 +60,11 @@ type Datastore struct {
 	sync bool
 
 	diskUsage int64
+
+	// opMap handles concurrent write operations (put/delete)
+	// to the same key
+	opMap     map[string]*sync.Mutex
+	opMapLock sync.RWMutex
 }
 
 type ShardFunc func(string) string
@@ -85,7 +112,7 @@ func Create(path string, fun *ShardIdV1) error {
 	}
 }
 
-func Open(path string, sync bool) (*Datastore, error) {
+func Open(path string, syncFiles bool) (*Datastore, error) {
 	_, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		return nil, ErrDatastoreDoesNotExist
@@ -102,8 +129,9 @@ func Open(path string, sync bool) (*Datastore, error) {
 		path:      path,
 		shardStr:  shardId.String(),
 		getDir:    shardId.Func(),
-		sync:      sync,
+		sync:      syncFiles,
 		diskUsage: 0,
+		opMap:     make(map[string]*sync.Mutex),
 	}
 
 	// This sets diskUsage to the correct value
@@ -179,10 +207,38 @@ func (fs *Datastore) makeDirNoSync(dir string) error {
 	return nil
 }
 
+// This function always runs under an opLock. Therefore, only one thread is
+// touching the affected files.
+func (fs *Datastore) renameAndUpdateDiskUsage(tmpPath, path string) error {
+	fi, err := os.Stat(path)
+
+	// Destination exists, we need to discount it from diskUsage
+	if fs != nil && err == nil {
+		atomic.AddInt64(&fs.diskUsage, -fi.Size())
+	} else if !os.IsNotExist(err) {
+		return err
+	}
+
+	// Rename and add new file's diskUsage
+	if err := osrename.Rename(tmpPath, path); err != nil {
+		return err
+	}
+	fs.updateDiskUsage(path, true)
+	return nil
+}
+
 var putMaxRetries = 6
 
-// Put stores a key/value in the datastore. Note that it does not replace
-// already existing values. If you wish to replace a value, do a Delete first.
+// Put stores a key/value in the datastore.
+//
+// Note, that we do not guarantee order of write operations (Put or Delete)
+// to the same key in this datastore.
+//
+// For example. i.e. in the case of two concurrent Put, we only guarantee
+// that one of them will come through, but cannot assure which one even if
+// one arrived slightly later than the other. In the case of a
+// concurrent Put and a Delete operation, we cannot guarantee which one
+// will win.
 func (fs *Datastore) Put(key datastore.Key, value interface{}) error {
 	val, ok := value.([]byte)
 	if !ok {
@@ -191,7 +247,11 @@ func (fs *Datastore) Put(key datastore.Key, value interface{}) error {
 
 	var err error
 	for i := 1; i <= putMaxRetries; i++ {
-		err = fs.doPut(key, val)
+		err = fs.doWriteOp(&op{
+			typ: putOp,
+			key: key,
+			v:   val,
+		})
 		if err == nil {
 			break
 		}
@@ -206,7 +266,89 @@ func (fs *Datastore) Put(key datastore.Key, value interface{}) error {
 	return err
 }
 
+func (fs *Datastore) doOp(oper *op) error {
+	switch oper.typ {
+	case putOp:
+		return fs.doPut(oper.key, oper.v)
+	case deleteOp:
+		return fs.doDelete(oper.key)
+	case renameOp:
+		return fs.renameAndUpdateDiskUsage(oper.tmp, oper.path)
+	default:
+		panic("bad operation, this is a bug")
+		return errors.New("bad operation, this is a bug")
+	}
+}
+
+// doWrite optmizes out write operations (put/delete) to the same
+// key by queueing them and suceeding all queued
+// operations if one of them does. In such case,
+// we assume that the first suceeding operation
+// on that key was the last one to happen after
+// two successful others.
+func (fs *Datastore) doWriteOp(oper *op) error {
+	keyStr := oper.key.String()
+
+	// Log that we are performing an operation
+	// on key
+	fs.opMapLock.Lock()
+	opLock, ok := fs.opMap[keyStr]
+	if !ok {
+		opLock = &sync.Mutex{}
+		fs.opMap[keyStr] = opLock
+	}
+	fs.opMapLock.Unlock()
+
+	// Attempt to run the operation.
+	// Only one operation can run at a time
+	// on the same key. We use opLock
+	// for that.
+	opLock.Lock()
+	defer func() {
+		opLock.Unlock()
+	}()
+
+	// If we have the opLock but the
+	// opMapLock does not contain our key, or it does
+	// but it points to a different lock (!),
+	// it means some other concurrent operation from our batch
+	// cleared it upon success. We succeed in this case.
+	fs.opMapLock.RLock()
+	newLock, ok := fs.opMap[keyStr]
+	fs.opMapLock.RUnlock()
+	if !ok || newLock != opLock {
+		return nil
+	}
+
+	// Otherwise, either there are no other concurrent
+	// operations, or they failed. Which means it's our
+	// turn to run.
+	err := fs.doOp(oper)
+	if err != nil {
+		// We failed. Tell the user. Leave the operation
+		// in opMap so that other potentially concurrent operations
+		// can try.
+		// Note: opMap will contain keys for operations which just
+		// failed, even if they did not compete with another
+		// one. If datastore operations fail all the time
+		// opMap will grow as it retains all keys of failed operations
+		// and only deletes them on success.
+		return err
+	}
+
+	//time.Sleep(2 * time.Second)
+
+	// In case of succees, we signal all other
+	// concurrent operations that they don't need to run
+	// by cleaning the key from the opMap
+	fs.opMapLock.Lock()
+	delete(fs.opMap, keyStr)
+	fs.opMapLock.Unlock()
+	return nil
+}
+
 func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
+
 	dir, path := fs.encode(key)
 	if err := fs.makeDir(dir); err != nil {
 		return err
@@ -242,21 +384,11 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 	}
 	closed = true
 
-	if err := os.Link(tmp.Name(), path); err != nil {
-		if os.IsExist(err) {
-			// Exit cleanly. Note: deferred function will remove
-			// the temp file and we don't need sync.
-			return nil
-		}
-		return err
-	}
-
-	if err := os.Remove(tmp.Name()); err != nil {
+	err = fs.renameAndUpdateDiskUsage(tmp.Name(), path)
+	if err != nil {
 		return err
 	}
 	removed = true
-
-	fs.updateDiskUsage(path, true)
 
 	if fs.sync {
 		if err := syncDir(dir); err != nil {
@@ -268,7 +400,7 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 
 func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 	var dirsToSync []string
-	files := make(map[*os.File]string)
+	files := make(map[*os.File]*op)
 
 	for key, value := range data {
 		val, ok := value.([]byte)
@@ -290,7 +422,12 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 			return err
 		}
 
-		files[tmp] = path
+		files[tmp] = &op{
+			typ:  renameOp,
+			path: path,
+			tmp:  tmp.Name(),
+			key:  key,
+		}
 	}
 
 	ops := make(map[*os.File]int)
@@ -326,24 +463,10 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 	}
 
 	// move files to their proper places
-	for fi, path := range files {
-		if err := os.Link(fi.Name(), path); err != nil {
-			if os.IsExist(err) {
-				// Deferred function will take care of
-				// removing temp file
-				continue
-			}
-			return err
-		}
-
-		if err := os.Remove(fi.Name()); err != nil {
-			return err
-		}
-
+	for fi, op := range files {
+		fs.doWriteOp(op)
 		// signify removed
 		ops[fi] = 2
-
-		fs.updateDiskUsage(path, true)
 	}
 
 	// now sync the dirs for those files
@@ -388,7 +511,20 @@ func (fs *Datastore) Has(key datastore.Key) (exists bool, err error) {
 	}
 }
 
+// Delete removes a key/value from the Datastore. Please read
+// the Put() explanation about the handling of concurrent write
+// operations to the same key.
 func (fs *Datastore) Delete(key datastore.Key) error {
+	return fs.doWriteOp(&op{
+		typ: deleteOp,
+		key: key,
+		v:   nil,
+	})
+}
+
+// This function always runs within an opLock for the given
+// key, and not concurrently.
+func (fs *Datastore) doDelete(key datastore.Key) error {
 	_, path := fs.encode(key)
 
 	fSize := fileSize(path)
