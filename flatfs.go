@@ -27,7 +27,7 @@ var log = logging.Logger("flatfs")
 
 const (
 	extension                  = ".data"
-	diskUsageFile              = "diskUsage.cache"
+	DiskUsageFile              = "diskUsage.cache"
 	diskUsageCheckpointPercent = 1.0
 )
 
@@ -589,7 +589,7 @@ func (fs *Datastore) walkTopLevel(path string, reschan chan query.Result) error 
 	return nil
 }
 
-// calculateDiskUsage tries to read the diskUsageFile for a cached
+// calculateDiskUsage tries to read the DiskUsageFile for a cached
 // diskUsage value, otherwise walks the datastore files.
 func (fs *Datastore) calculateDiskUsage() error {
 	// Try to obtain a previously stored value from disk
@@ -675,11 +675,11 @@ func (fs *Datastore) persistDiskUsageFile() {
 		return
 	}
 
-	osrename.Rename(tmp.Name(), filepath.Join(fs.path, diskUsageFile))
+	osrename.Rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile))
 }
 
 func (fs *Datastore) readDiskUsageFile() int64 {
-	fpath := filepath.Join(fs.path, diskUsageFile)
+	fpath := filepath.Join(fs.path, DiskUsageFile)
 	duB, err := ioutil.ReadFile(fpath)
 	if err != nil {
 		return 0
