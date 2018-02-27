@@ -30,9 +30,9 @@ const (
 )
 
 const (
-	putOp = iota
-	deleteOp
-	renameOp
+	opPut = iota
+	opDelete
+	opRename
 )
 
 type opT int
@@ -63,8 +63,7 @@ type Datastore struct {
 
 	// opMap handles concurrent write operations (put/delete)
 	// to the same key
-	opMap     map[string]*sync.Mutex
-	opMapLock sync.RWMutex
+	opMap *sync.Map
 }
 
 type ShardFunc func(string) string
@@ -131,7 +130,7 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 		getDir:    shardId.Func(),
 		sync:      syncFiles,
 		diskUsage: 0,
-		opMap:     make(map[string]*sync.Mutex),
+		opMap:     &sync.Map{},
 	}
 
 	// This sets diskUsage to the correct value
@@ -248,7 +247,7 @@ func (fs *Datastore) Put(key datastore.Key, value interface{}) error {
 	var err error
 	for i := 1; i <= putMaxRetries; i++ {
 		err = fs.doWriteOp(&op{
-			typ: putOp,
+			typ: opPut,
 			key: key,
 			v:   val,
 		})
@@ -268,15 +267,14 @@ func (fs *Datastore) Put(key datastore.Key, value interface{}) error {
 
 func (fs *Datastore) doOp(oper *op) error {
 	switch oper.typ {
-	case putOp:
+	case opPut:
 		return fs.doPut(oper.key, oper.v)
-	case deleteOp:
+	case opDelete:
 		return fs.doDelete(oper.key)
-	case renameOp:
+	case opRename:
 		return fs.renameAndUpdateDiskUsage(oper.tmp, oper.path)
 	default:
 		panic("bad operation, this is a bug")
-		return errors.New("bad operation, this is a bug")
 	}
 }
 
@@ -285,37 +283,30 @@ func (fs *Datastore) doOp(oper *op) error {
 // operations if one of them does. In such case,
 // we assume that the first suceeding operation
 // on that key was the last one to happen after
-// two successful others.
+// all successful others.
 func (fs *Datastore) doWriteOp(oper *op) error {
 	keyStr := oper.key.String()
 
 	// Log that we are performing an operation
-	// on key
-	fs.opMapLock.Lock()
-	opLock, ok := fs.opMap[keyStr]
-	if !ok {
-		opLock = &sync.Mutex{}
-		fs.opMap[keyStr] = opLock
-	}
-	fs.opMapLock.Unlock()
+	// on key. If an operation is ongoing, we will
+	// use the existing lock on it.
+	opLock := &sync.Mutex{}
+	v, _ := fs.opMap.LoadOrStore(keyStr, opLock)
+	opLock = v.(*sync.Mutex)
 
 	// Attempt to run the operation.
 	// Only one operation can run at a time
 	// on the same key. We use opLock
 	// for that.
 	opLock.Lock()
-	defer func() {
-		opLock.Unlock()
-	}()
+	defer opLock.Unlock()
 
 	// If we have the opLock but the
 	// opMapLock does not contain our key, or it does
 	// but it points to a different lock (!),
 	// it means some other concurrent operation from our batch
 	// cleared it upon success. We succeed in this case.
-	fs.opMapLock.RLock()
-	newLock, ok := fs.opMap[keyStr]
-	fs.opMapLock.RUnlock()
+	newLock, ok := fs.opMap.Load(keyStr)
 	if !ok || newLock != opLock {
 		return nil
 	}
@@ -336,14 +327,10 @@ func (fs *Datastore) doWriteOp(oper *op) error {
 		return err
 	}
 
-	//time.Sleep(2 * time.Second)
-
 	// In case of succees, we signal all other
 	// concurrent operations that they don't need to run
 	// by cleaning the key from the opMap
-	fs.opMapLock.Lock()
-	delete(fs.opMap, keyStr)
-	fs.opMapLock.Unlock()
+	fs.opMap.Delete(keyStr)
 	return nil
 }
 
@@ -423,7 +410,7 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 		}
 
 		files[tmp] = &op{
-			typ:  renameOp,
+			typ:  opRename,
 			path: path,
 			tmp:  tmp.Name(),
 			key:  key,
@@ -516,7 +503,7 @@ func (fs *Datastore) Has(key datastore.Key) (exists bool, err error) {
 // operations to the same key.
 func (fs *Datastore) Delete(key datastore.Key) error {
 	return fs.doWriteOp(&op{
-		typ: deleteOp,
+		typ: opDelete,
 		key: key,
 		v:   nil,
 	})
