@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io/ioutil"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -25,8 +26,9 @@ import (
 var log = logging.Logger("flatfs")
 
 const (
-	extension     = ".data"
-	diskUsageFile = "diskUsage.cache"
+	extension                  = ".data"
+	diskUsageFile              = "diskUsage.cache"
+	diskUsageCheckpointPercent = 1.0
 )
 
 const (
@@ -56,7 +58,8 @@ type Datastore struct {
 	// sychronize all writes and directory changes for added safety
 	sync bool
 
-	diskUsage int64
+	diskUsage           int64
+	diskUsageCheckpoint int64
 
 	// opMap handles concurrent write operations (put/delete)
 	// to the same key
@@ -528,7 +531,8 @@ func (fs *Datastore) doDelete(key datastore.Key) error {
 
 	switch err := os.Remove(path); {
 	case err == nil:
-		atomic.AddInt64(&fs.diskUsage, -fSize)
+		newDu := atomic.AddInt64(&fs.diskUsage, -fSize)
+		fs.checkpointDiskUsage(newDu)
 		return nil
 	case os.IsNotExist(err):
 		return datastore.ErrNotFound
@@ -632,7 +636,20 @@ func (fs *Datastore) updateDiskUsage(path string, add bool) {
 	}
 
 	if fsize != 0 {
-		atomic.AddInt64(&fs.diskUsage, fsize)
+		newDu := atomic.AddInt64(&fs.diskUsage, fsize)
+		fs.checkpointDiskUsage(newDu)
+	}
+}
+
+func (fs *Datastore) checkpointDiskUsage(newDuInt int64) {
+	newDu := float64(newDuInt)
+	lastCheckpointDu := float64(atomic.LoadInt64(&fs.diskUsageCheckpoint))
+	diff := math.Abs(newDu - lastCheckpointDu)
+
+	// If the difference between the checkpointed disk usage and
+	// current one is larger than than 1% of the checkpointed: store it.
+	if (lastCheckpointDu * diskUsageCheckpointPercent / 100.0) < diff {
+		fs.persistDiskUsageFile()
 	}
 }
 
@@ -643,6 +660,8 @@ func (fs *Datastore) persistDiskUsageFile() {
 		// do not store on errors. just ignore them
 		return
 	}
+
+	atomic.StoreInt64(&fs.diskUsageCheckpoint, int64(du))
 
 	duB := []byte(fmt.Sprintf("%d", du))
 	tmp, err := ioutil.TempFile(fs.path, "du-")
@@ -659,10 +678,8 @@ func (fs *Datastore) persistDiskUsageFile() {
 	osrename.Rename(tmp.Name(), filepath.Join(fs.path, diskUsageFile))
 }
 
-// deletes the diskUsageFile after reading
 func (fs *Datastore) readDiskUsageFile() int64 {
 	fpath := filepath.Join(fs.path, diskUsageFile)
-	defer os.Remove(fpath)
 	duB, err := ioutil.ReadFile(fpath)
 	if err != nil {
 		return 0
@@ -671,6 +688,7 @@ func (fs *Datastore) readDiskUsageFile() int64 {
 	if err != nil {
 		return 0
 	}
+	atomic.StoreInt64(&fs.diskUsageCheckpoint, i)
 	return i
 }
 
