@@ -35,16 +35,13 @@ const (
 	opRename
 )
 
-type opT int
+var _ datastore.Datastore = (*Datastore)(nil)
 
-// op wraps useful arguments of write operations
-type op struct {
-	typ  opT           // operation type
-	key  datastore.Key // datastore key. Mandatory.
-	tmp  string        // temp file path
-	path string        // file path
-	v    []byte        // value
-}
+var (
+	ErrDatastoreExists       = errors.New("datastore already exist")
+	ErrDatastoreDoesNotExist = errors.New("datastore directory does not exist")
+	ErrShardingFileMissing   = fmt.Errorf("%s file not found in datastore", SHARDING_FN)
+)
 
 // Datastore implements the go-datastore Interface.
 // Note this datastore cannot guarantee order of concurrent
@@ -63,18 +60,61 @@ type Datastore struct {
 
 	// opMap handles concurrent write operations (put/delete)
 	// to the same key
-	opMap *sync.Map
+	opMap *opMap
 }
 
 type ShardFunc func(string) string
 
-var _ datastore.Datastore = (*Datastore)(nil)
+type opT int
 
-var (
-	ErrDatastoreExists       = errors.New("datastore already exist")
-	ErrDatastoreDoesNotExist = errors.New("datastore directory does not exist")
-	ErrShardingFileMissing   = fmt.Errorf("%s file not found in datastore", SHARDING_FN)
-)
+// op wraps useful arguments of write operations
+type op struct {
+	typ  opT           // operation type
+	key  datastore.Key // datastore key. Mandatory.
+	tmp  string        // temp file path
+	path string        // file path
+	v    []byte        // value
+}
+
+type opMap struct {
+	ops *sync.Map
+}
+
+type opResult struct {
+	mu      sync.RWMutex
+	success bool
+
+	opMap *opMap
+	name  string
+}
+
+// Returns nil if there's nothing to do.
+func (m *opMap) Begin(name string) *opResult {
+	for {
+		myOp := &opResult{opMap: m, name: name}
+		myOp.mu.Lock()
+		opIface, loaded := m.ops.LoadOrStore(name, myOp)
+		if !loaded { // no one else doing ops with this key
+			return myOp
+		}
+
+		op := opIface.(*opResult)
+		// someone else doing ops with this key, wait for
+		// the result
+		op.mu.RLock()
+		if op.success {
+			return nil
+		}
+
+		// if we are here, we will retry the operation
+	}
+}
+
+func (o *opResult) Finish(ok bool) {
+	o.success = ok
+	o.opMap.ops.Delete(o.name)
+	o.mu.Unlock()
+}
 
 func Create(path string, fun *ShardIdV1) error {
 
@@ -130,7 +170,9 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 		getDir:    shardId.Func(),
 		sync:      syncFiles,
 		diskUsage: 0,
-		opMap:     &sync.Map{},
+		opMap: &opMap{
+			ops: &sync.Map{},
+		},
 	}
 
 	// This sets diskUsage to the correct value
@@ -287,51 +329,19 @@ func (fs *Datastore) doOp(oper *op) error {
 func (fs *Datastore) doWriteOp(oper *op) error {
 	keyStr := oper.key.String()
 
-	// Log that we are performing an operation
-	// on key. If an operation is ongoing, we will
-	// use the existing lock on it.
-	opLock := &sync.Mutex{}
-	v, _ := fs.opMap.LoadOrStore(keyStr, opLock)
-	opLock = v.(*sync.Mutex)
-
-	// Attempt to run the operation.
-	// Only one operation can run at a time
-	// on the same key. We use opLock
-	// for that.
-	opLock.Lock()
-	defer opLock.Unlock()
-
-	// If we have the opLock but the
-	// opMapLock does not contain our key, or it does
-	// but it points to a different lock (!),
-	// it means some other concurrent operation from our batch
-	// cleared it upon success. We succeed in this case.
-	newLock, ok := fs.opMap.Load(keyStr)
-	if !ok || newLock != opLock {
+	opRes := fs.opMap.Begin(keyStr)
+	if opRes == nil { // nothing to do, a concurrent op succeeded
 		return nil
 	}
 
-	// Otherwise, either there are no other concurrent
-	// operations, or they failed. Which means it's our
-	// turn to run.
+	// Do the operation
 	err := fs.doOp(oper)
-	if err != nil {
-		// We failed. Tell the user. Leave the operation
-		// in opMap so that other potentially concurrent operations
-		// can try.
-		// Note: opMap will contain keys for operations which just
-		// failed, even if they did not compete with another
-		// one. If datastore operations fail all the time
-		// opMap will grow as it retains all keys of failed operations
-		// and only deletes them on success.
-		return err
-	}
 
-	// In case of succees, we signal all other
-	// concurrent operations that they don't need to run
-	// by cleaning the key from the opMap
-	fs.opMap.Delete(keyStr)
-	return nil
+	// Finish it. If no error, it will signal other operations
+	// waiting on this result to succeed. Otherwise, they will
+	// retry.
+	opRes.Finish(err == nil)
+	return err
 }
 
 func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
