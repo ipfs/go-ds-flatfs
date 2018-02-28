@@ -80,7 +80,7 @@ type op struct {
 }
 
 type opMap struct {
-	ops *sync.Map
+	ops sync.Map
 }
 
 type opResult struct {
@@ -174,7 +174,7 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 		sync:      syncFiles,
 		diskUsage: 0,
 		opMap: &opMap{
-			ops: &sync.Map{},
+			ops: sync.Map{},
 		},
 	}
 
@@ -264,11 +264,9 @@ func (fs *Datastore) renameAndUpdateDiskUsage(tmpPath, path string) error {
 	}
 
 	// Rename and add new file's diskUsage
-	if err := osrename.Rename(tmpPath, path); err != nil {
-		return err
-	}
+	err := osrename.Rename(tmpPath, path)
 	fs.updateDiskUsage(path, true)
-	return nil
+	return err
 }
 
 var putMaxRetries = 6
