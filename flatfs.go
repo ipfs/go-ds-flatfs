@@ -264,7 +264,7 @@ func (fs *Datastore) renameAndUpdateDiskUsage(tmpPath, path string) error {
 	// Rename and add new file's diskUsage. If the rename fails,
 	// it will either a) Re-add the size of an existing file, which
 	// was sustracted before b) Add 0 if there is no existing file.
-	err := osrename.Rename(tmpPath, path)
+	err = osrename.Rename(tmpPath, path)
 	fs.updateDiskUsage(path, true)
 	return err
 }
@@ -598,20 +598,33 @@ func (fs *Datastore) calculateDiskUsage() error {
 
 	// Otherwise walk the datastore files
 	var du int64
-	err := filepath.Walk(fs.path,
-		func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
+	dirs := []string{fs.path}
+	i := 0
+
+	for {
+		if i >= len(dirs) {
+			break
+		}
+
+		dir := dirs[i]
+		i++
+
+		f, err := os.Open(dir)
+
+		if err != nil {
+			return err
+		}
+		stats, err := f.Readdir(0) // 0 means no limit
+		if err != nil {
+			return err
+		}
+		for _, fi := range stats {
+			du += fi.Size()
+			if fi.IsDir() {
+				dirs = append(dirs, filepath.Join(dir, fi.Name()))
 			}
-			du += info.Size()
-			return nil
-		})
-
-	if err != nil {
-		log.Errorf("cannot calculate disk usage: %s", err)
-		return err
+		}
 	}
-
 	atomic.StoreInt64(&fs.diskUsage, du)
 	return nil
 }

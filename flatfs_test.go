@@ -430,9 +430,10 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	t.Log("duPostDelete:", duDelete)
 
 	fs.Close()
+	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
 
 	// Make sure size is correctly calculated on re-open
-	fs, err = flatfs.Open(temp, true)
+	fs, err = flatfs.Open(temp, false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
