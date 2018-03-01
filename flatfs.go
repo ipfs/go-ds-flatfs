@@ -173,9 +173,7 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 		getDir:    shardId.Func(),
 		sync:      syncFiles,
 		diskUsage: 0,
-		opMap: &opMap{
-			ops: sync.Map{},
-		},
+		opMap:     new(opMap),
 	}
 
 	// This sets diskUsage to the correct value
@@ -263,7 +261,9 @@ func (fs *Datastore) renameAndUpdateDiskUsage(tmpPath, path string) error {
 		return err
 	}
 
-	// Rename and add new file's diskUsage
+	// Rename and add new file's diskUsage. If the rename fails,
+	// it will either a) Re-add the size of an existing file, which
+	// was sustracted before b) Add 0 if there is no existing file.
 	err := osrename.Rename(tmpPath, path)
 	fs.updateDiskUsage(path, true)
 	return err
