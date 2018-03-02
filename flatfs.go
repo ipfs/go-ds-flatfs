@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -34,11 +35,18 @@ var (
 	// DiskUsageFile is the name of the file to cache the size of the
 	// datastore in disk
 	DiskUsageFile = "diskUsage.cache"
-	// DiskUsageFilesAverage is the number of files per folder
+	// DiskUsageFilesAverage is the maximum number of files per folder
 	// to stat in order to calculate the size of the datastore.
-	// Any other files will be considered to have the average size
-	// of the previously processed ones
+	// The size of the rest of the files in a folder will be assumed
+	// to be the average of the values obtained. This includes
+	// regular files and directories.
 	DiskUsageFilesAverage = 100
+	// DiskUsageFoldersAverage is the maximum number of folders
+	// to read in order to calculate the size of the datastore. Note that
+	// folders are also considered files with respect to
+	// DiskUsageFilesAverage (therefore this value only makes sense
+	// if it's lower).
+	DiskUsageFoldersAverage = 50
 )
 
 const (
@@ -54,6 +62,10 @@ var (
 	ErrDatastoreDoesNotExist = errors.New("datastore directory does not exist")
 	ErrShardingFileMissing   = fmt.Errorf("%s file not found in datastore", SHARDING_FN)
 )
+
+func init() {
+	rand.Seed(time.Now().UTC().UnixNano())
+}
 
 // Datastore implements the go-datastore Interface.
 // Note this datastore cannot guarantee order of concurrent
@@ -614,42 +626,74 @@ func folderSize(path string) (int64, error) {
 		return 0, err
 	}
 
-	files, err := folder.Readdirnames(0)
+	files, err := folder.Readdirnames(-1)
 	if err != nil {
 		return 0, err
 	}
 
 	totalFiles := len(files)
-	filesToProcess := files
-	nonProcessed := 0
-	if DiskUsageFilesAverage < totalFiles && DiskUsageFilesAverage > 0 {
-		nonProcessed = totalFiles - DiskUsageFilesAverage
-		filesToProcess = files[0:DiskUsageFilesAverage]
+	i := 0
+	filesProcessed := 0
+	foldersProcessed := 0
+	maxFiles := DiskUsageFilesAverage
+	maxFolders := DiskUsageFoldersAverage
+	if maxFiles <= 0 {
+		maxFiles = totalFiles
+	}
+	if maxFolders <= 0 {
+		maxFolders = totalFiles
 	}
 
-	for _, fname := range filesToProcess {
+	for {
+		if i >= totalFiles || filesProcessed >= maxFiles {
+			break
+		}
+
+		index := i // by default, we read them in order
+		// but if we have a limit, we choose randomly
+		if maxFiles < totalFiles {
+			index = rand.Intn(totalFiles)
+		}
+		// Stat the file
+		fname := files[index]
 		subpath := filepath.Join(path, fname)
 		st, err := os.Stat(subpath)
 		if err != nil {
 			return 0, err
 		}
-		du += st.Size()
 
+		// Find folder size recursively
 		if st.IsDir() {
-			du2, err := folderSize(filepath.Join(subpath))
-			if err != nil {
-				return 0, err
+			// Only process folders if not over the limit
+			if foldersProcessed < maxFolders {
+				du2, err := folderSize(filepath.Join(subpath))
+				if err != nil {
+					return 0, err
+				}
+				du += du2
+				foldersProcessed++
+				filesProcessed++
 			}
-			du += du2
+		} else { // in any other case, add the file size
+			du += st.Size()
+			filesProcessed++
 		}
+
+		i++
 	}
 
-	// Avg is total size in this folder up to now / total files processed
-	avg := float64(du) / float64(len(filesToProcess))
-	duEstimation := int64(avg * float64(nonProcessed))
+	nonProcessed := totalFiles - filesProcessed
 
+	// Avg is total size in this folder up to now / total files processed
+	// it includes folders ant not folders
+	avg := 0.0
+	if filesProcessed > 0 {
+		avg = float64(du) / float64(filesProcessed)
+	}
+	duEstimation := int64(avg * float64(nonProcessed))
 	du += duEstimation
 	du += stat.Size()
+	//fmt.Println(path, "total:", totalFiles, "totalStat:", i, "totalFile:", filesProcessed, "totalFolder:", foldersProcessed, "left:", nonProcessed, "avg:", int(avg), "est:", int(duEstimation), "du:", du)
 	return du, nil
 }
 

@@ -635,10 +635,10 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 		t.Fatalf("New fail: %v\n", err)
 	}
 
-	count := 500
+	count := 50000
 	for i := 0; i < count; i++ {
-		k := datastore.NewKey(fmt.Sprintf("test-%d", i))
-		v := []byte("10bytes---")
+		k := datastore.NewKey(fmt.Sprintf("%d-test-%d", i, i))
+		v := make([]byte, 1000)
 		err = fs.Put(k, v)
 		if err != nil {
 			t.Fatalf("Put fail: %v\n", err)
@@ -650,7 +650,8 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
 
 	// This will do a full du
-	flatfs.DiskUsageFilesAverage = 0
+	flatfs.DiskUsageFilesAverage = -1
+	flatfs.DiskUsageFoldersAverage = -1
 	fs, err = flatfs.Open(temp, false)
 	if err != nil {
 		t.Fatalf("Open fail: %v\n", err)
@@ -665,7 +666,8 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
 
 	// This will estimate the size
-	flatfs.DiskUsageFilesAverage = 50
+	flatfs.DiskUsageFilesAverage = 200
+	flatfs.DiskUsageFoldersAverage = 75
 	// Make sure size is correctly calculated on re-open
 	fs, err = flatfs.Open(temp, false)
 	if err != nil {
@@ -681,10 +683,10 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 	t.Log("Est:", duEst)
 
 	diff := int(math.Abs(float64(int(duReopen) - int(duEst))))
-	maxDiff := int(0.01 * float64(duReopen)) // %1 of actual
+	maxDiff := int(0.05 * float64(duReopen)) // %5 of actual
 
 	if diff > maxDiff {
-		t.Fatal("expected a better estimation within 1%")
+		t.Fatal("expected a better estimation within 5%")
 	}
 }
 
