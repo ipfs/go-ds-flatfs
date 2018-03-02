@@ -27,8 +27,18 @@ var log = logging.Logger("flatfs")
 
 const (
 	extension                  = ".data"
-	DiskUsageFile              = "diskUsage.cache"
 	diskUsageCheckpointPercent = 1.0
+)
+
+var (
+	// DiskUsageFile is the name of the file to cache the size of the
+	// datastore in disk
+	DiskUsageFile = "diskUsage.cache"
+	// DiskUsageFilesAverage is the number of files per folder
+	// to stat in order to calculate the size of the datastore.
+	// Any other files will be considered to have the average size
+	// of the previously processed ones
+	DiskUsageFilesAverage = 100
 )
 
 const (
@@ -587,6 +597,62 @@ func (fs *Datastore) walkTopLevel(path string, reschan chan query.Result) error 
 	return nil
 }
 
+// folderSize estimates the diskUsage of a folder by reading
+// up to DiskUsageFilesAverage entries in it and assumming any
+// other files will have an avereage size.
+func folderSize(path string) (int64, error) {
+	var du int64
+
+	folder, err := os.Open(path)
+	if err != nil {
+		return 0, err
+	}
+	defer folder.Close()
+
+	stat, err := folder.Stat()
+	if err != nil {
+		return 0, err
+	}
+
+	files, err := folder.Readdirnames(0)
+	if err != nil {
+		return 0, err
+	}
+
+	totalFiles := len(files)
+	filesToProcess := files
+	nonProcessed := 0
+	if DiskUsageFilesAverage < totalFiles && DiskUsageFilesAverage > 0 {
+		nonProcessed = totalFiles - DiskUsageFilesAverage
+		filesToProcess = files[0:DiskUsageFilesAverage]
+	}
+
+	for _, fname := range filesToProcess {
+		subpath := filepath.Join(path, fname)
+		st, err := os.Stat(subpath)
+		if err != nil {
+			return 0, err
+		}
+		du += st.Size()
+
+		if st.IsDir() {
+			du2, err := folderSize(filepath.Join(subpath))
+			if err != nil {
+				return 0, err
+			}
+			du += du2
+		}
+	}
+
+	// Avg is total size in this folder up to now / total files processed
+	avg := float64(du) / float64(len(filesToProcess))
+	duEstimation := int64(avg * float64(nonProcessed))
+
+	du += duEstimation
+	du += stat.Size()
+	return du, nil
+}
+
 // calculateDiskUsage tries to read the DiskUsageFile for a cached
 // diskUsage value, otherwise walks the datastore files.
 func (fs *Datastore) calculateDiskUsage() error {
@@ -596,35 +662,11 @@ func (fs *Datastore) calculateDiskUsage() error {
 		return nil
 	}
 
-	// Otherwise walk the datastore files
-	var du int64
-	dirs := []string{fs.path}
-	i := 0
-
-	for {
-		if i >= len(dirs) {
-			break
-		}
-
-		dir := dirs[i]
-		i++
-
-		f, err := os.Open(dir)
-
-		if err != nil {
-			return err
-		}
-		stats, err := f.Readdir(0) // 0 means no limit
-		if err != nil {
-			return err
-		}
-		for _, fi := range stats {
-			du += fi.Size()
-			if fi.IsDir() {
-				dirs = append(dirs, filepath.Join(dir, fi.Name()))
-			}
-		}
+	du, err := folderSize(fs.path)
+	if err != nil {
+		return err
 	}
+
 	atomic.StoreInt64(&fs.diskUsage, du)
 	return nil
 }

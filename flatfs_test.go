@@ -438,7 +438,6 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 		t.Fatalf("New fail: %v\n", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
 	duReopen, err := fs.DiskUsage()
 	if err != nil {
 		t.Fatal(err)
@@ -627,6 +626,70 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 
 func TestDiskUsageBatch(t *testing.T) { tryAllShardFuncs(t, testDiskUsageBatch) }
 
+func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	count := 500
+	for i := 0; i < count; i++ {
+		k := datastore.NewKey(fmt.Sprintf("test-%d", i))
+		v := []byte("10bytes---")
+		err = fs.Put(k, v)
+		if err != nil {
+			t.Fatalf("Put fail: %v\n", err)
+		}
+	}
+
+	// Delete checkpoint
+	fs.Close()
+	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
+
+	// This will do a full du
+	flatfs.DiskUsageFilesAverage = 0
+	fs, err = flatfs.Open(temp, false)
+	if err != nil {
+		t.Fatalf("Open fail: %v\n", err)
+	}
+
+	duReopen, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fs.Close()
+	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
+
+	// This will estimate the size
+	flatfs.DiskUsageFilesAverage = 50
+	// Make sure size is correctly calculated on re-open
+	fs, err = flatfs.Open(temp, false)
+	if err != nil {
+		t.Fatalf("Open fail: %v\n", err)
+	}
+
+	duEst, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log("RealDu:", duReopen)
+	t.Log("Est:", duEst)
+
+	diff := int(math.Abs(float64(int(duReopen) - int(duEst))))
+	maxDiff := int(0.01 * float64(duReopen)) // %1 of actual
+
+	if diff > maxDiff {
+		t.Fatal("expected a better estimation within 1%")
+	}
+}
+
+func TestDiskUsageEstimation(t *testing.T) { tryAllShardFuncs(t, testDiskUsageEstimation) }
+
 func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
@@ -785,6 +848,7 @@ func BenchmarkConsecutivePut(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+	b.StopTimer() // avoid counting cleanup
 }
 
 func BenchmarkBatchedPut(b *testing.B) {
@@ -826,4 +890,5 @@ func BenchmarkBatchedPut(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+	b.StopTimer() // avoid counting cleanup
 }
