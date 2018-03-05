@@ -667,7 +667,7 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 
 	// This will estimate the size
 	flatfs.DiskUsageFilesAverage = 200
-	flatfs.DiskUsageFoldersAverage = 75
+	flatfs.DiskUsageFoldersAverage = 90
 	// Make sure size is correctly calculated on re-open
 	fs, err = flatfs.Open(temp, false)
 	if err != nil {
@@ -683,10 +683,10 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 	t.Log("Est:", duEst)
 
 	diff := int(math.Abs(float64(int(duReopen) - int(duEst))))
-	maxDiff := int(0.05 * float64(duReopen)) // %5 of actual
+	maxDiff := int(0.1 * float64(duReopen)) // %10 of actual
 
 	if diff > maxDiff {
-		t.Fatal("expected a better estimation within 5%")
+		t.Fatal("expected a better estimation within 10%")
 	}
 }
 
