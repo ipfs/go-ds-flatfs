@@ -58,7 +58,7 @@ const (
 var _ datastore.Datastore = (*Datastore)(nil)
 
 var (
-	ErrDatastoreExists       = errors.New("datastore already exist")
+	ErrDatastoreExists       = errors.New("datastore already exists")
 	ErrDatastoreDoesNotExist = errors.New("datastore directory does not exist")
 	ErrShardingFileMissing   = fmt.Errorf("%s file not found in datastore", SHARDING_FN)
 )
