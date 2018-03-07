@@ -40,13 +40,13 @@ var (
 	// The size of the rest of the files in a folder will be assumed
 	// to be the average of the values obtained. This includes
 	// regular files and directories.
-	DiskUsageFilesAverage = 100
-	// DiskUsageFoldersAverage is the maximum number of folders
-	// to read in order to calculate the size of the datastore. Note that
-	// folders are also considered files with respect to
-	// DiskUsageFilesAverage (therefore this value only makes sense
-	// if it's lower).
-	DiskUsageFoldersAverage = 50
+	DiskUsageFilesAverage = 2000
+	// DiskUsageCalcTimeout is the maximum time to spend
+	// calculating the DiskUsage upon a start when no
+	// DiskUsageFile is present.
+	// If this period did not suffice to read the size of the datastore,
+	// the remaining sizes will be stimated.
+	DiskUsageCalcTimeout = 5 * time.Minute
 )
 
 const (
@@ -612,7 +612,7 @@ func (fs *Datastore) walkTopLevel(path string, reschan chan query.Result) error 
 // folderSize estimates the diskUsage of a folder by reading
 // up to DiskUsageFilesAverage entries in it and assumming any
 // other files will have an avereage size.
-func folderSize(path string) (int64, error) {
+func folderSize(path string, deadline time.Time) (int64, error) {
 	var du int64
 
 	folder, err := os.Open(path)
@@ -634,14 +634,16 @@ func folderSize(path string) (int64, error) {
 	totalFiles := len(files)
 	i := 0
 	filesProcessed := 0
-	foldersProcessed := 0
 	maxFiles := DiskUsageFilesAverage
-	maxFolders := DiskUsageFoldersAverage
 	if maxFiles <= 0 {
 		maxFiles = totalFiles
 	}
-	if maxFolders <= 0 {
-		maxFolders = totalFiles
+
+	// randomize file order
+	// https://stackoverflow.com/a/42776696
+	for i := len(files) - 1; i > 0; i-- {
+		j := rand.Intn(i + 1)
+		files[i], files[j] = files[j], files[i]
 	}
 
 	for {
@@ -649,13 +651,13 @@ func folderSize(path string) (int64, error) {
 			break
 		}
 
-		index := i // by default, we read them in order
-		// but if we have a limit, we choose randomly
-		if maxFiles < totalFiles {
-			index = rand.Intn(totalFiles)
+		// Do not process any files after deadline is over
+		if time.Now().After(deadline) {
+			break
 		}
+
 		// Stat the file
-		fname := files[index]
+		fname := files[i]
 		subpath := filepath.Join(path, fname)
 		st, err := os.Stat(subpath)
 		if err != nil {
@@ -664,16 +666,12 @@ func folderSize(path string) (int64, error) {
 
 		// Find folder size recursively
 		if st.IsDir() {
-			// Only process folders if not over the limit
-			if foldersProcessed < maxFolders {
-				du2, err := folderSize(filepath.Join(subpath))
-				if err != nil {
-					return 0, err
-				}
-				du += du2
-				foldersProcessed++
-				filesProcessed++
+			du2, err := folderSize(filepath.Join(subpath), deadline)
+			if err != nil {
+				return 0, err
 			}
+			du += du2
+			filesProcessed++
 		} else { // in any other case, add the file size
 			du += st.Size()
 			filesProcessed++
@@ -693,7 +691,7 @@ func folderSize(path string) (int64, error) {
 	duEstimation := int64(avg * float64(nonProcessed))
 	du += duEstimation
 	du += stat.Size()
-	//fmt.Println(path, "total:", totalFiles, "totalStat:", i, "totalFile:", filesProcessed, "totalFolder:", foldersProcessed, "left:", nonProcessed, "avg:", int(avg), "est:", int(duEstimation), "du:", du)
+	//fmt.Println(path, "total:", totalFiles, "totalStat:", i, "totalFile:", filesProcessed, "left:", nonProcessed, "avg:", int(avg), "est:", int(duEstimation), "du:", du)
 	return du, nil
 }
 
@@ -706,9 +704,18 @@ func (fs *Datastore) calculateDiskUsage() error {
 		return nil
 	}
 
-	du, err := folderSize(fs.path)
+	fmt.Printf("Calculating datastore size. This might take %s at most and will happen only once\n", DiskUsageCalcTimeout.String())
+	deadline := time.Now().Add(DiskUsageCalcTimeout)
+	du, err := folderSize(fs.path, deadline)
 	if err != nil {
 		return err
+	}
+	if time.Now().After(deadline) {
+		fmt.Println("WARN: It took to long to calculate the datastore size")
+		fmt.Printf("WARN: The total size (%d) is an estimation. You can fix errors by\n", du)
+		fmt.Printf("WARN: replacing the %s file with the right disk usage in bytes and\n",
+			filepath.Join(fs.path, DiskUsageFile))
+		fmt.Println("WARN: re-opening the datastore")
 	}
 
 	atomic.StoreInt64(&fs.diskUsage, du)
