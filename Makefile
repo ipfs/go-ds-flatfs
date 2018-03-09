@@ -12,3 +12,8 @@ deps: gx
 	gx-go rewrite
 	go get -t ./...
 
+rw:
+	gx-go rw
+
+rwundo:
+	gx-go rw --undo

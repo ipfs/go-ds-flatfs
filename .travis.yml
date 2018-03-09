@@ -5,14 +5,14 @@ os:
 language: go
 
 go:
-    - 1.7
+    - 1.9.2
 
 install: true
 
 script:
     - make deps
     - gx-go rewrite
-    - go test -race -coverprofile=unittest.coverprofile -covermode=atomic .
+    - go test -v -race -coverprofile=unittest.coverprofile -covermode=atomic .
 
 
 after_success:

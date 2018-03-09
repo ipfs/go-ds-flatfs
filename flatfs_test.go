@@ -2,18 +2,22 @@ package flatfs_test
 
 import (
 	"encoding/base32"
+	"fmt"
 	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/query"
 	dstest "github.com/ipfs/go-datastore/test"
+
 	"github.com/ipfs/go-ds-flatfs"
 )
 
@@ -184,7 +188,7 @@ func testStorage(p *params, t *testing.T) {
 			return err
 		}
 		switch path {
-		case ".", "..", "SHARDING":
+		case ".", "..", "SHARDING", flatfs.DiskUsageFile:
 			// ignore
 		case "_README":
 			_, err := ioutil.ReadFile(absPath)
@@ -214,7 +218,7 @@ func testStorage(p *params, t *testing.T) {
 		return nil
 	}
 	if err := filepath.Walk(temp, walk); err != nil {
-		t.Fatal("walk: %v", err)
+		t.Fatalf("walk: %v", err)
 	}
 	if !seen {
 		t.Error("did not see the data file")
@@ -376,6 +380,317 @@ func testQuerySimple(dirFunc mkShardFunc, t *testing.T) {
 
 func TestQuerySimple(t *testing.T) { tryAllShardFuncs(t, testQuerySimple) }
 
+func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	t.Log(temp)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	duNew, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("duNew:", duNew)
+
+	count := 200
+	for i := 0; i < count; i++ {
+		k := datastore.NewKey(fmt.Sprintf("test-%d", i))
+		v := []byte("10bytes---")
+		err = fs.Put(k, v)
+		if err != nil {
+			t.Fatalf("Put fail: %v\n", err)
+		}
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	duElems, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("duPostPut:", duElems)
+
+	for i := 0; i < count; i++ {
+		k := datastore.NewKey(fmt.Sprintf("test-%d", i))
+		err = fs.Delete(k)
+		if err != nil {
+			t.Fatalf("Delete fail: %v\n", err)
+		}
+	}
+
+	time.Sleep(100 * time.Millisecond)
+	duDelete, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("duPostDelete:", duDelete)
+
+	fs.Close()
+	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
+
+	// Make sure size is correctly calculated on re-open
+	fs, err = flatfs.Open(temp, false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	duReopen, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Log("duReopen:", duReopen)
+
+	// Checks
+	if duNew == 0 {
+		t.Error("new datastores should have some size")
+	}
+
+	if duElems <= duNew {
+		t.Error("size should grow as new elements are added")
+	}
+
+	if duElems-duDelete != uint64(count*10) {
+		t.Error("size should be reduced exactly as size of objects deleted")
+	}
+
+	if duReopen < duNew {
+		t.Error("Reopened datastore should not be smaller")
+	}
+}
+
+func TestDiskUsage(t *testing.T) {
+	tryAllShardFuncs(t, testDiskUsage)
+}
+
+func TestDiskUsageDoubleCount(t *testing.T) {
+	tryAllShardFuncs(t, testDiskUsageDoubleCount)
+}
+
+// test that concurrently writing and deleting the same key/value
+// does not throw any errors and disk usage does not do
+// any double-counting.
+func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	var count int
+	var wg sync.WaitGroup
+	testKey := datastore.NewKey("test")
+
+	put := func() {
+		defer wg.Done()
+		for i := 0; i < count; i++ {
+			v := []byte("10bytes---")
+			err := fs.Put(testKey, v)
+			if err != nil {
+				t.Fatalf("Put fail: %v\n", err)
+			}
+		}
+	}
+
+	del := func() {
+		defer wg.Done()
+		for i := 0; i < count; i++ {
+			err := fs.Delete(testKey)
+			if err != nil && !strings.Contains(err.Error(), "key not found") {
+				t.Fatalf("Delete fail: %v\n", err)
+			}
+		}
+	}
+
+	// Add one element and then remove it and check disk usage
+	// makes sense
+	count = 1
+	wg.Add(2)
+	put()
+	du, _ := fs.DiskUsage()
+	del()
+	du2, _ := fs.DiskUsage()
+	if du-10 != du2 {
+		t.Error("should have deleted exactly 10 bytes:", du, du2)
+	}
+
+	// Add and remove many times at the same time
+	count = 200
+	wg.Add(4)
+	go put()
+	go del()
+	go put()
+	go del()
+	wg.Wait()
+
+	du3, _ := fs.DiskUsage()
+	has, err := fs.Has(testKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if has { // put came last
+		if du3 != du {
+			t.Error("du should be the same as after first put:", du, du3)
+		}
+	} else { //delete came last
+		if du3 != du2 {
+			t.Error("du should be the same as after first delete:", du2, du3)
+		}
+	}
+}
+
+func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	fsBatch, _ := fs.Batch()
+
+	count := 200
+	var wg sync.WaitGroup
+	testKeys := []datastore.Key{}
+	for i := 0; i < count; i++ {
+		k := datastore.NewKey(fmt.Sprintf("test%d", i))
+		testKeys = append(testKeys, k)
+	}
+
+	put := func() {
+		for i := 0; i < count; i++ {
+			fsBatch.Put(testKeys[i], []byte("10bytes---"))
+		}
+	}
+	commit := func() {
+		defer wg.Done()
+		err := fsBatch.Commit()
+		if err != nil {
+			t.Fatalf("Batch Put fail: %v\n", err)
+		}
+	}
+
+	del := func() {
+		defer wg.Done()
+		for _, k := range testKeys {
+			err := fs.Delete(k)
+			if err != nil && !strings.Contains(err.Error(), "key not found") {
+				t.Fatalf("Delete fail: %v\n", err)
+			}
+		}
+	}
+
+	// Put many elements and then delete them and check disk usage
+	// makes sense
+	wg.Add(2)
+	put()
+	commit()
+	du, _ := fs.DiskUsage()
+	del()
+	du2, _ := fs.DiskUsage()
+	if du-uint64(10*count) != du2 {
+		t.Errorf("should have deleted exactly %d bytes: %d %d", 10*count, du, du2)
+	}
+
+	// Do deletes while doing putManys concurrently
+	wg.Add(2)
+	put()
+	go commit()
+	go del()
+	wg.Wait()
+
+	du3, _ := fs.DiskUsage()
+	// Now query how many keys we have
+	results, err := fs.Query(query.Query{
+		KeysOnly: true,
+	})
+	rest, err := results.Rest()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	expectedSize := uint64(len(rest) * 10)
+
+	if exp := du2 + expectedSize; exp != du3 {
+		t.Error("diskUsage has skewed off from real size:",
+			exp, du3)
+	}
+}
+
+func TestDiskUsageBatch(t *testing.T) { tryAllShardFuncs(t, testDiskUsageBatch) }
+
+func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	count := 50000
+	for i := 0; i < count; i++ {
+		k := datastore.NewKey(fmt.Sprintf("%d-test-%d", i, i))
+		v := make([]byte, 1000)
+		err = fs.Put(k, v)
+		if err != nil {
+			t.Fatalf("Put fail: %v\n", err)
+		}
+	}
+
+	// Delete checkpoint
+	fs.Close()
+	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
+
+	// This will do a full du
+	flatfs.DiskUsageFilesAverage = -1
+	fs, err = flatfs.Open(temp, false)
+	if err != nil {
+		t.Fatalf("Open fail: %v\n", err)
+	}
+
+	duReopen, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	fs.Close()
+	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
+
+	// This will estimate the size. Since all files are the same
+	// length we can use a low file average number.
+	flatfs.DiskUsageFilesAverage = 100
+	// Make sure size is correctly calculated on re-open
+	fs, err = flatfs.Open(temp, false)
+	if err != nil {
+		t.Fatalf("Open fail: %v\n", err)
+	}
+
+	duEst, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Log("RealDu:", duReopen)
+	t.Log("Est:", duEst)
+
+	diff := int(math.Abs(float64(int(duReopen) - int(duEst))))
+	maxDiff := int(0.05 * float64(duReopen)) // %5 of actual
+
+	if diff > maxDiff {
+		t.Fatal("expected a better estimation within 5%")
+	}
+}
+
+func TestDiskUsageEstimation(t *testing.T) { tryAllShardFuncs(t, testDiskUsageEstimation) }
+
 func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
@@ -485,7 +800,9 @@ func TestNoCluster(t *testing.T) {
 	tolerance := math.Floor(idealFilesPerDir * 0.25)
 	count := 0
 	for _, dir := range dirs {
-		if dir.Name() == flatfs.SHARDING_FN || dir.Name() == flatfs.README_FN {
+		if dir.Name() == flatfs.SHARDING_FN ||
+			dir.Name() == flatfs.README_FN ||
+			dir.Name() == flatfs.DiskUsageFile {
 			continue
 		}
 		count += 1
@@ -532,6 +849,7 @@ func BenchmarkConsecutivePut(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+	b.StopTimer() // avoid counting cleanup
 }
 
 func BenchmarkBatchedPut(b *testing.B) {
@@ -573,4 +891,5 @@ func BenchmarkBatchedPut(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+	b.StopTimer() // avoid counting cleanup
 }
