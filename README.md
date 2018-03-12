@@ -60,6 +60,8 @@ datastore is not open), with the right disk usage value in size. I.e., in the da
     3919232394        .
     $ echo -n "3919232394" > diskUsage.cache
 
+The accuracy of the initial disk usage calculation is stores in the file `diskUsage.notes`, this file is for reference only and is
+currently not used in any other way.
 
 ## Contribute
 
