@@ -34,6 +34,9 @@ var (
 	// DiskUsageFile is the name of the file to cache the size of the
 	// datastore in disk
 	DiskUsageFile = "diskUsage.cache"
+	// DiskUsageNodes stores notes about the accuracy of the size of
+	// the diskusage calculation
+	DiskUsageNotes = "diskUsage.notes"
 	// DiskUsageFilesAverage is the maximum number of files per folder
 	// to stat in order to calculate the size of the datastore.
 	// The size of the rest of the files in a folder will be assumed
@@ -53,6 +56,27 @@ const (
 	opDelete
 	opRename
 )
+
+type initAccuracy string
+
+const (
+	exactA    initAccuracy = "initial-exact"
+	approxA   initAccuracy = "initial-approximate"
+	timedoutA initAccuracy = "initial-timed-out"
+)
+
+func combineAccuracy(a, b initAccuracy) initAccuracy {
+	if a == timedoutA || b == timedoutA {
+		return timedoutA
+	}
+	if a == approxA || b == approxA {
+		return approxA
+	}
+	if a == exactA && b == exactA {
+		return exactA
+	}
+	return ""
+}
 
 var _ datastore.Datastore = (*Datastore)(nil)
 
@@ -611,23 +635,23 @@ func (fs *Datastore) walkTopLevel(path string, reschan chan query.Result) error 
 // folderSize estimates the diskUsage of a folder by reading
 // up to DiskUsageFilesAverage entries in it and assumming any
 // other files will have an avereage size.
-func folderSize(path string, deadline time.Time) (int64, error) {
+func folderSize(path string, deadline time.Time) (int64, initAccuracy, error) {
 	var du int64
 
 	folder, err := os.Open(path)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer folder.Close()
 
 	stat, err := folder.Stat()
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	files, err := folder.Readdirnames(-1)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	totalFiles := len(files)
@@ -645,13 +669,18 @@ func folderSize(path string, deadline time.Time) (int64, error) {
 		files[i], files[j] = files[j], files[i]
 	}
 
+	accuracy := exactA
 	for {
-		if i >= totalFiles || filesProcessed >= maxFiles {
+		// Do not process any files after deadline is over
+		if time.Now().After(deadline) {
+			accuracy = timedoutA
 			break
 		}
 
-		// Do not process any files after deadline is over
-		if time.Now().After(deadline) {
+		if i >= totalFiles || filesProcessed >= maxFiles {
+			if filesProcessed >= maxFiles {
+				accuracy = approxA
+			}
 			break
 		}
 
@@ -660,15 +689,16 @@ func folderSize(path string, deadline time.Time) (int64, error) {
 		subpath := filepath.Join(path, fname)
 		st, err := os.Stat(subpath)
 		if err != nil {
-			return 0, err
+			return 0, "", err
 		}
 
 		// Find folder size recursively
 		if st.IsDir() {
-			du2, err := folderSize(filepath.Join(subpath), deadline)
+			du2, acc, err := folderSize(filepath.Join(subpath), deadline)
 			if err != nil {
-				return 0, err
+				return 0, "", err
 			}
+			accuracy = combineAccuracy(acc, accuracy)
 			du += du2
 			filesProcessed++
 		} else { // in any other case, add the file size
@@ -691,7 +721,7 @@ func folderSize(path string, deadline time.Time) (int64, error) {
 	du += duEstimation
 	du += stat.Size()
 	//fmt.Println(path, "total:", totalFiles, "totalStat:", i, "totalFile:", filesProcessed, "left:", nonProcessed, "avg:", int(avg), "est:", int(duEstimation), "du:", du)
-	return du, nil
+	return du, accuracy, nil
 }
 
 // calculateDiskUsage tries to read the DiskUsageFile for a cached
@@ -705,11 +735,11 @@ func (fs *Datastore) calculateDiskUsage() error {
 
 	fmt.Printf("Calculating datastore size. This might take %s at most and will happen only once\n", DiskUsageCalcTimeout.String())
 	deadline := time.Now().Add(DiskUsageCalcTimeout)
-	du, err := folderSize(fs.path, deadline)
+	du, accuracy, err := folderSize(fs.path, deadline)
 	if err != nil {
 		return err
 	}
-	if time.Now().After(deadline) {
+	if accuracy == timedoutA {
 		fmt.Println("WARN: It took to long to calculate the datastore size")
 		fmt.Printf("WARN: The total size (%d) is an estimation. You can fix errors by\n", du)
 		fmt.Printf("WARN: replacing the %s file with the right disk usage in bytes and\n",
@@ -718,6 +748,12 @@ func (fs *Datastore) calculateDiskUsage() error {
 	}
 
 	atomic.StoreInt64(&fs.diskUsage, du)
+
+	err = fs.writeDiskUsageNotesFile(accuracy)
+	if err != nil {
+		log.Errorf("calculateDiskUsage: %v\n", err)
+	}
+
 	return nil
 }
 
@@ -779,6 +815,22 @@ func (fs *Datastore) persistDiskUsageFile() {
 	}
 
 	os.Rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile))
+}
+
+func (fs *Datastore) writeDiskUsageNotesFile(accuracy initAccuracy) error {
+	f, err := os.Create(filepath.Join(fs.path, DiskUsageNotes))
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintf(f, "%s\n", accuracy)
+	if err != nil {
+		return err
+	}
+	err = f.Close()
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 func (fs *Datastore) readDiskUsageFile() int64 {

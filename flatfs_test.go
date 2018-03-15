@@ -188,7 +188,7 @@ func testStorage(p *params, t *testing.T) {
 			return err
 		}
 		switch path {
-		case ".", "..", "SHARDING", flatfs.DiskUsageFile:
+		case ".", "..", "SHARDING", flatfs.DiskUsageFile, flatfs.DiskUsageNotes:
 			// ignore
 		case "_README":
 			_, err := ioutil.ReadFile(absPath)
@@ -428,6 +428,15 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Log("duPostDelete:", duDelete)
+
+	// Make sure DiskUsageNotes files exists and the correct value
+	d, err := ioutil.ReadFile(filepath.Join(temp, flatfs.DiskUsageNotes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(d) != "initial-exact\n" {
+		t.Errorf("Unexpected contents in %s: >%s<", flatfs.DiskUsageNotes, string(d))
+	}
 
 	fs.Close()
 	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
@@ -687,6 +696,15 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 	if diff > maxDiff {
 		t.Fatal("expected a better estimation within 5%")
 	}
+
+	// Make sure DiskUsageNotes files exists and the correct value
+	d, err := ioutil.ReadFile(filepath.Join(temp, flatfs.DiskUsageNotes))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(d) != "initial-approximate\n" {
+		t.Errorf("Unexpected contents in %s: >%s<", flatfs.DiskUsageNotes, string(d))
+	}
 }
 
 func TestDiskUsageEstimation(t *testing.T) { tryAllShardFuncs(t, testDiskUsageEstimation) }
@@ -802,7 +820,8 @@ func TestNoCluster(t *testing.T) {
 	for _, dir := range dirs {
 		if dir.Name() == flatfs.SHARDING_FN ||
 			dir.Name() == flatfs.README_FN ||
-			dir.Name() == flatfs.DiskUsageFile {
+			dir.Name() == flatfs.DiskUsageFile ||
+			dir.Name() == flatfs.DiskUsageNotes {
 			continue
 		}
 		count += 1
