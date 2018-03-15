@@ -19,7 +19,6 @@ import (
 
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/query"
-	"github.com/jbenet/go-os-rename"
 
 	logging "github.com/ipfs/go-log"
 )
@@ -286,7 +285,7 @@ func (fs *Datastore) renameAndUpdateDiskUsage(tmpPath, path string) error {
 	// Rename and add new file's diskUsage. If the rename fails,
 	// it will either a) Re-add the size of an existing file, which
 	// was sustracted before b) Add 0 if there is no existing file.
-	err = osrename.Rename(tmpPath, path)
+	err = os.Rename(tmpPath, path)
 	fs.updateDiskUsage(path, true)
 	return err
 }
@@ -779,7 +778,7 @@ func (fs *Datastore) persistDiskUsageFile() {
 		return
 	}
 
-	osrename.Rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile))
+	os.Rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile))
 }
 
 func (fs *Datastore) readDiskUsageFile() int64 {
