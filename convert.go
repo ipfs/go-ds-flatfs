@@ -13,7 +13,6 @@ import (
 
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/query"
-	"github.com/jbenet/go-os-rename"
 )
 
 func UpgradeV0toV1(path string, prefixLen int) error {
@@ -152,7 +151,7 @@ func Move(oldPath string, newPath string, out io.Writer) error {
 			// else we found something unexpected, so to be safe just move it
 			log.Warningf("found unexpected file in datastore directory: \"%s\", moving anyway\n", fn)
 			newPath := filepath.Join(newDS.path, fn)
-			err := osrename.Rename(oldPath, newPath)
+			err := os.Rename(oldPath, newPath)
 			if err != nil {
 				return err
 			}
@@ -173,7 +172,7 @@ func moveKey(oldDS *Datastore, newDS *Datastore, key datastore.Key) error {
 	if err != nil {
 		return err
 	}
-	err = osrename.Rename(oldPath, newPath)
+	err = os.Rename(oldPath, newPath)
 	if err != nil {
 		return err
 	}
