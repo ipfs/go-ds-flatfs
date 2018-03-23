@@ -429,6 +429,11 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	}
 	t.Log("duPostDelete:", duDelete)
 
+	// Make sure the accuracy value is correct
+	if fs.Accuracy() != "initial-exact" {
+		t.Errorf("Unexpected value for fs.Accuracy(): %s", fs.Accuracy())
+	}
+
 	fs.Close()
 	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
 
@@ -686,6 +691,11 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 
 	if diff > maxDiff {
 		t.Fatal("expected a better estimation within 5%")
+	}
+
+	// Make sure the accuracy value is correct
+	if fs.Accuracy() != "initial-approximate" {
+		t.Errorf("Unexpected value for fs.Accuracy(): %s", fs.Accuracy())
 	}
 }
 

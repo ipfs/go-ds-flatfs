@@ -4,6 +4,7 @@
 package flatfs
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -11,7 +12,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -54,6 +54,27 @@ const (
 	opRename
 )
 
+type initAccuracy string
+
+const (
+	exactA    initAccuracy = "initial-exact"
+	approxA   initAccuracy = "initial-approximate"
+	timedoutA initAccuracy = "initial-timed-out"
+)
+
+func combineAccuracy(a, b initAccuracy) initAccuracy {
+	if a == timedoutA || b == timedoutA {
+		return timedoutA
+	}
+	if a == approxA || b == approxA {
+		return approxA
+	}
+	if a == exactA && b == exactA {
+		return exactA
+	}
+	return ""
+}
+
 var _ datastore.Datastore = (*Datastore)(nil)
 
 var (
@@ -79,12 +100,22 @@ type Datastore struct {
 	// sychronize all writes and directory changes for added safety
 	sync bool
 
-	diskUsage           int64
-	diskUsageCheckpoint int64
+	diskUsage   int64
+	storedValue diskUsageValue
+	// updateLock must be held when updating storedValue or writing
+	// to a file, it doesn't need to be held when reading
+	// checkpoint.DiskUsage atomically (or when the datastore is
+	// initializing)
+	updateLock sync.Mutex
 
 	// opMap handles concurrent write operations (put/delete)
 	// to the same key
 	opMap *opMap
+}
+
+type diskUsageValue struct {
+	diskUsage int64
+	accuracy  initAccuracy
 }
 
 type ShardFunc func(string) string
@@ -611,23 +642,23 @@ func (fs *Datastore) walkTopLevel(path string, reschan chan query.Result) error 
 // folderSize estimates the diskUsage of a folder by reading
 // up to DiskUsageFilesAverage entries in it and assumming any
 // other files will have an avereage size.
-func folderSize(path string, deadline time.Time) (int64, error) {
+func folderSize(path string, deadline time.Time) (int64, initAccuracy, error) {
 	var du int64
 
 	folder, err := os.Open(path)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	defer folder.Close()
 
 	stat, err := folder.Stat()
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	files, err := folder.Readdirnames(-1)
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 
 	totalFiles := len(files)
@@ -645,13 +676,18 @@ func folderSize(path string, deadline time.Time) (int64, error) {
 		files[i], files[j] = files[j], files[i]
 	}
 
+	accuracy := exactA
 	for {
-		if i >= totalFiles || filesProcessed >= maxFiles {
+		// Do not process any files after deadline is over
+		if time.Now().After(deadline) {
+			accuracy = timedoutA
 			break
 		}
 
-		// Do not process any files after deadline is over
-		if time.Now().After(deadline) {
+		if i >= totalFiles || filesProcessed >= maxFiles {
+			if filesProcessed >= maxFiles {
+				accuracy = approxA
+			}
 			break
 		}
 
@@ -660,15 +696,16 @@ func folderSize(path string, deadline time.Time) (int64, error) {
 		subpath := filepath.Join(path, fname)
 		st, err := os.Stat(subpath)
 		if err != nil {
-			return 0, err
+			return 0, "", err
 		}
 
 		// Find folder size recursively
 		if st.IsDir() {
-			du2, err := folderSize(filepath.Join(subpath), deadline)
+			du2, acc, err := folderSize(filepath.Join(subpath), deadline)
 			if err != nil {
-				return 0, err
+				return 0, "", err
 			}
+			accuracy = combineAccuracy(acc, accuracy)
 			du += du2
 			filesProcessed++
 		} else { // in any other case, add the file size
@@ -691,25 +728,26 @@ func folderSize(path string, deadline time.Time) (int64, error) {
 	du += duEstimation
 	du += stat.Size()
 	//fmt.Println(path, "total:", totalFiles, "totalStat:", i, "totalFile:", filesProcessed, "left:", nonProcessed, "avg:", int(avg), "est:", int(duEstimation), "du:", du)
-	return du, nil
+	return du, accuracy, nil
 }
 
 // calculateDiskUsage tries to read the DiskUsageFile for a cached
 // diskUsage value, otherwise walks the datastore files.
+// it is only safe to call in Open()
 func (fs *Datastore) calculateDiskUsage() error {
 	// Try to obtain a previously stored value from disk
 	if persDu := fs.readDiskUsageFile(); persDu > 0 {
-		atomic.StoreInt64(&fs.diskUsage, persDu)
+		fs.diskUsage = persDu
 		return nil
 	}
 
 	fmt.Printf("Calculating datastore size. This might take %s at most and will happen only once\n", DiskUsageCalcTimeout.String())
 	deadline := time.Now().Add(DiskUsageCalcTimeout)
-	du, err := folderSize(fs.path, deadline)
+	du, accuracy, err := folderSize(fs.path, deadline)
 	if err != nil {
 		return err
 	}
-	if time.Now().After(deadline) {
+	if accuracy == timedoutA {
 		fmt.Println("WARN: It took to long to calculate the datastore size")
 		fmt.Printf("WARN: The total size (%d) is an estimation. You can fix errors by\n", du)
 		fmt.Printf("WARN: replacing the %s file with the right disk usage in bytes and\n",
@@ -717,7 +755,10 @@ func (fs *Datastore) calculateDiskUsage() error {
 		fmt.Println("WARN: re-opening the datastore")
 	}
 
-	atomic.StoreInt64(&fs.diskUsage, du)
+	fs.storedValue.accuracy = accuracy
+	fs.diskUsage = du
+	fs.persistDiskUsageFile()
+
 	return nil
 }
 
@@ -746,7 +787,7 @@ func (fs *Datastore) updateDiskUsage(path string, add bool) {
 
 func (fs *Datastore) checkpointDiskUsage(newDuInt int64) {
 	newDu := float64(newDuInt)
-	lastCheckpointDu := float64(atomic.LoadInt64(&fs.diskUsageCheckpoint))
+	lastCheckpointDu := float64(atomic.LoadInt64(&fs.storedValue.diskUsage))
 	diff := math.Abs(newDu - lastCheckpointDu)
 
 	// If the difference between the checkpointed disk usage and
@@ -756,43 +797,54 @@ func (fs *Datastore) checkpointDiskUsage(newDuInt int64) {
 	}
 }
 
+// persistDiskUsageFile updates the diskusage file with the last known
+// value
 func (fs *Datastore) persistDiskUsageFile() {
-	// Store DiskUsage on clean shutdowns.
-	du, err := fs.DiskUsage()
-	if err != nil {
-		// do not store on errors. just ignore them
-		return
-	}
+	fs.updateLock.Lock()
+	defer fs.updateLock.Unlock()
 
-	atomic.StoreInt64(&fs.diskUsageCheckpoint, int64(du))
+	du := atomic.LoadInt64(&fs.diskUsage)
 
-	duB := []byte(fmt.Sprintf("%d", du))
+	origVal := fs.storedValue.diskUsage
+	// update the stored diskUsage value now to prevent unnecessary
+	// calls to persistDiskUsageFile.  On error role back the value to
+	// the original
+	atomic.StoreInt64(&fs.storedValue.diskUsage, du)
+
 	tmp, err := ioutil.TempFile(fs.path, "du-")
 	if err != nil {
-		return
-	}
-	if _, err := tmp.Write(duB); err != nil {
-		return
-	}
-	if err := tmp.Close(); err != nil {
+		atomic.StoreInt64(&fs.storedValue.diskUsage, origVal)
 		return
 	}
 
-	os.Rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile))
+	encoder := json.NewEncoder(tmp)
+	if err := encoder.Encode(&fs.storedValue); err != nil {
+		atomic.StoreInt64(&fs.storedValue.diskUsage, origVal)
+		return
+	}
+
+	if err := tmp.Close(); err != nil {
+		atomic.StoreInt64(&fs.storedValue.diskUsage, origVal)
+		return
+	}
+
+	if err := os.Rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile)); err != nil {
+		atomic.StoreInt64(&fs.storedValue.diskUsage, origVal)
+	}
 }
 
+// readDiskUsageFile is only safe to call in Open()
 func (fs *Datastore) readDiskUsageFile() int64 {
 	fpath := filepath.Join(fs.path, DiskUsageFile)
 	duB, err := ioutil.ReadFile(fpath)
 	if err != nil {
 		return 0
 	}
-	i, err := strconv.ParseInt(string(duB), 10, 64)
+	err = json.Unmarshal(duB, &fs.storedValue)
 	if err != nil {
 		return 0
 	}
-	atomic.StoreInt64(&fs.diskUsageCheckpoint, i)
-	return i
+	return fs.storedValue.diskUsage
 }
 
 // DiskUsage implements the PersistentDatastore interface
@@ -811,6 +863,13 @@ func (fs *Datastore) DiskUsage() (uint64, error) {
 
 	du := atomic.LoadInt64(&fs.diskUsage)
 	return uint64(du), nil
+}
+
+// Accuracy returns a string representing the accuracy of the
+// DiskUsage() result, the value returned is implementation defined
+// and for informational purposes only
+func (fs *Datastore) Accuracy() string {
+	return string(fs.storedValue.accuracy)
 }
 
 func (fs *Datastore) walk(path string, reschan chan query.Result) error {
@@ -856,6 +915,8 @@ func (fs *Datastore) walk(path string, reschan chan query.Result) error {
 
 func (fs *Datastore) Close() error {
 	fs.persistDiskUsageFile()
+	// FIXME: Should we check that the file was updated and if not
+	// return an error
 	return nil
 }
 

@@ -53,6 +53,8 @@ written when the datastore is closed.
 This means that for certain datastores (huge ones, those with very slow disks or special content), the values reported by
 `DiskUsage()` might be reduced accuracy and the first startup (without a `diskUsage.cache` file present), might be slow.
 
+FIXME: Fix text, we now use a json file.
+
 If you need increased accuracy or a fast start from the first time, you can replace the `diskUsage.cache` file (while the
 datastore is not open), with the right disk usage value in size. I.e., in the datastore root:
 
@@ -60,6 +62,10 @@ datastore is not open), with the right disk usage value in size. I.e., in the da
     3919232394        .
     $ echo -n "3919232394" > diskUsage.cache
 
+The accuracy of the initial disk usage calculation is stored in the file `diskUsage.notes`.  This file is currently for reference only and
+not used in any other way.  If the initial calculation was accurate the file will contain the value `initial-exact`.  If some of the
+directories have too many entries and the disk usage for that directory was estimated based on the first 2000 entries, the file will contain
+`initial-approximate`.  If the calculation took too long and timed out as indicated above, the file will contain `initial-timed-out`.
 
 ## Contribute
 
