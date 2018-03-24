@@ -102,11 +102,9 @@ type Datastore struct {
 
 	diskUsage   int64
 	storedValue diskUsageValue
-	// updateLock must be held when updating storedValue or writing
-	// to a file, it doesn't need to be held when reading
-	// checkpoint.DiskUsage atomically (or when the datastore is
-	// initializing)
-	updateLock sync.Mutex
+
+	checkpointCh chan bool
+	done         chan bool
 
 	// opMap handles concurrent write operations (put/delete)
 	// to the same key
@@ -238,6 +236,7 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 		// elements in the datastore.
 		return nil, err
 	}
+	fs.checkpointLoop()
 	return fs, nil
 }
 
@@ -793,16 +792,42 @@ func (fs *Datastore) checkpointDiskUsage(newDuInt int64) {
 	// If the difference between the checkpointed disk usage and
 	// current one is larger than than 1% of the checkpointed: store it.
 	if (lastCheckpointDu * diskUsageCheckpointPercent / 100.0) < diff {
-		fs.persistDiskUsageFile()
+		fs.signalCheckpoint()
 	}
 }
 
-// persistDiskUsageFile updates the diskusage file with the last known
-// value
-func (fs *Datastore) persistDiskUsageFile() {
-	fs.updateLock.Lock()
-	defer fs.updateLock.Unlock()
+func (fs *Datastore) signalCheckpoint() {
+	select {
+	case fs.checkpointCh <- true:
+		// msg send
+	default:
+		// checkpoint request already pending
+	}
+}
 
+func (fs *Datastore) checkpointLoop() {
+	fs.checkpointCh = make(chan bool, 1)
+	fs.done = make(chan bool)
+	go func() {
+		for {
+			//println("waiting...")
+			_, more := <-fs.checkpointCh
+			if more {
+				//println("checkpoint")
+				fs.persistDiskUsageFile()
+			} else {
+				//println("shutdown")
+				fs.done <- true
+				return
+			}
+		}
+	}()
+}
+
+// persistDiskUsageFile updates the diskusage file with the last known
+// value, should only be called during initialization or within the
+// checkpoint loop
+func (fs *Datastore) persistDiskUsageFile() {
 	du := atomic.LoadInt64(&fs.diskUsage)
 
 	origVal := fs.storedValue.diskUsage
@@ -875,6 +900,10 @@ func (fs *Datastore) Accuracy() string {
 func (fs *Datastore) walk(path string, reschan chan query.Result) error {
 	dir, err := os.Open(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			// not an error if the file disappeared
+			return nil
+		}
 		return err
 	}
 	defer dir.Close()
@@ -913,11 +942,21 @@ func (fs *Datastore) walk(path string, reschan chan query.Result) error {
 	return nil
 }
 
-func (fs *Datastore) Close() error {
-	fs.persistDiskUsageFile()
-	// FIXME: Should we check that the file was updated and if not
-	// return an error
+// Deactivate closes background maintenance threads, most write
+// operations will fail but readonly operations will continue to
+// function
+func (fs *Datastore) deactivate() error {
+	if fs.checkpointCh != nil {
+		fs.checkpointCh <- true
+		close(fs.checkpointCh)
+		<-fs.done
+		fs.checkpointCh = nil
+	}
 	return nil
+}
+
+func (fs *Datastore) Close() error {
+	return fs.deactivate()
 }
 
 type flatfsBatch struct {

@@ -49,6 +49,7 @@ func TestPutBadValueType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	err = fs.Put(datastore.NewKey("quux"), 22)
 	if g, e := err, datastore.ErrInvalidType; g != e {
@@ -66,6 +67,7 @@ func testPut(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	err = fs.Put(datastore.NewKey("quux"), []byte("foobar"))
 	if err != nil {
@@ -83,6 +85,7 @@ func testGet(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	const input = "foobar"
 	err = fs.Put(datastore.NewKey("quux"), []byte(input))
@@ -113,6 +116,7 @@ func testPutOverwrite(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	const (
 		loser  = "foobar"
@@ -147,6 +151,7 @@ func testGetNotFoundError(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	_, err = fs.Get(datastore.NewKey("quux"))
 	if g, e := err, datastore.ErrNotFound; g != e {
@@ -171,12 +176,14 @@ func testStorage(p *params, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	err = fs.Put(datastore.NewKey(p.key), []byte("foobar"))
 	if err != nil {
 		t.Fatalf("Put fail: %v\n", err)
 	}
 
+	fs.Close()
 	seen := false
 	haveREADME := false
 	walk := func(absPath string, fi os.FileInfo, err error) error {
@@ -262,6 +269,7 @@ func testHasNotFound(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	found, err := fs.Has(datastore.NewKey("quux"))
 	if err != nil {
@@ -282,6 +290,8 @@ func testHasFound(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
+
 	err = fs.Put(datastore.NewKey("quux"), []byte("foobar"))
 	if err != nil {
 		t.Fatalf("Put fail: %v\n", err)
@@ -306,6 +316,7 @@ func testDeleteNotFound(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	err = fs.Delete(datastore.NewKey("quux"))
 	if g, e := err, datastore.ErrNotFound; g != e {
@@ -323,6 +334,8 @@ func testDeleteFound(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
+
 	err = fs.Put(datastore.NewKey("quux"), []byte("foobar"))
 	if err != nil {
 		t.Fatalf("Put fail: %v\n", err)
@@ -350,6 +363,8 @@ func testQuerySimple(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
+
 	const myKey = "quux"
 	err = fs.Put(datastore.NewKey(myKey), []byte("foobar"))
 	if err != nil {
@@ -389,6 +404,7 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	time.Sleep(100 * time.Millisecond)
 	duNew, err := fs.DiskUsage()
@@ -486,6 +502,7 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	var count int
 	var wg sync.WaitGroup
@@ -558,6 +575,7 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	fsBatch, _ := fs.Batch()
 
@@ -639,6 +657,7 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	count := 50000
 	for i := 0; i < count; i++ {
@@ -709,6 +728,7 @@ func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	dstest.RunBatchTest(t, fs)
 }
@@ -723,6 +743,7 @@ func testBatchDelete(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	dstest.RunBatchDeleteTest(t, fs)
 }
@@ -788,6 +809,7 @@ func TestNoCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	r := rand.New(rand.NewSource(0))
 	N := 3200 // should be divisible by 32 so the math works out
@@ -850,6 +872,7 @@ func BenchmarkConsecutivePut(b *testing.B) {
 	if err != nil {
 		b.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	b.ResetTimer()
 
@@ -881,6 +904,7 @@ func BenchmarkBatchedPut(b *testing.B) {
 	if err != nil {
 		b.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	b.ResetTimer()
 
