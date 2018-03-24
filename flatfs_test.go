@@ -824,6 +824,7 @@ func TestNoCluster(t *testing.T) {
 		}
 	}
 
+	fs.Close()
 	dirs, err := ioutil.ReadDir(tempdir)
 	if err != nil {
 		t.Fatalf("ReadDir fail: %v\n", err)
