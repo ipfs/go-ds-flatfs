@@ -28,6 +28,7 @@ var log = logging.Logger("flatfs")
 const (
 	extension                  = ".data"
 	diskUsageCheckpointPercent = 1.0
+	diskUsageCheckpointTimeout = 2.0 * time.Second
 )
 
 var (
@@ -804,28 +805,38 @@ func (fs *Datastore) checkpointDiskUsage() {
 }
 
 func (fs *Datastore) checkpointLoop() {
+	timerActive := true
+	timer := time.NewTimer(0)
 	for {
-		_, more := <-fs.checkpointCh
-		fs.dirty = true
-		du := atomic.LoadInt64(&fs.diskUsage)
-		if more {
+		select {
+		case _, more := <-fs.checkpointCh:
+			du := atomic.LoadInt64(&fs.diskUsage)
+			if !more { // shutting down
+				fs.writeDiskUsageFile(du)
+				fs.done <- true
+				return
+			}
+			fs.dirty = true
+			// If the difference between the checkpointed disk usage and
+			// current one is larger than than `diskUsageCheckpointPercent`
+			// of the checkpointed: store it.
 			newDu := float64(du)
 			lastCheckpointDu := float64(fs.storedValue.diskUsage)
 			diff := math.Abs(newDu - lastCheckpointDu)
-
-			// If the difference between the checkpointed disk usage and
-			// current one is larger than than 1% of the checkpointed: store it.
 			if (lastCheckpointDu * diskUsageCheckpointPercent / 100.0) < diff {
 				fs.writeDiskUsageFile(du)
 			}
-
-			// FIXME: If dirty set a timer to write the diskusage
-			// anyway after X seconds of inactivity.
-		} else {
-			// shutting down, write the final value
-			fs.writeDiskUsageFile(du)
-			fs.done <- true
-			return
+			// Otherwise insure the value will be written to disk after
+			// `diskUsageCheckpointTimeout`
+			if fs.dirty && !timerActive {
+				timer.Reset(diskUsageCheckpointTimeout)
+			}
+		case <-timer.C:
+			timerActive = false
+			if fs.dirty {
+				du := atomic.LoadInt64(&fs.diskUsage)
+				fs.writeDiskUsageFile(du)
+			}
 		}
 	}
 }
