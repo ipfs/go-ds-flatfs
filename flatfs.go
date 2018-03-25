@@ -798,7 +798,7 @@ func (fs *Datastore) updateDiskUsage(path string, add bool) {
 func (fs *Datastore) checkpointDiskUsage() {
 	select {
 	case fs.checkpointCh <- true:
-		// msg send
+		// msg sent
 	default:
 		// checkpoint request already pending
 	}
@@ -807,19 +807,20 @@ func (fs *Datastore) checkpointDiskUsage() {
 func (fs *Datastore) checkpointLoop() {
 	timerActive := true
 	timer := time.NewTimer(0)
+	defer timer.Stop()
 	for {
 		select {
 		case _, more := <-fs.checkpointCh:
 			du := atomic.LoadInt64(&fs.diskUsage)
+			fs.dirty = true
 			if !more { // shutting down
 				fs.writeDiskUsageFile(du)
 				if fs.dirty {
-					log.Errorf("could not right final value of disk usage to file, future estimates may be inaccurate")
+					log.Errorf("could not store final value of disk usage to file, future estimates may be inaccurate")
 				}
 				fs.done <- true
 				return
 			}
-			fs.dirty = true
 			// If the difference between the checkpointed disk usage and
 			// current one is larger than than `diskUsageCheckpointPercent`
 			// of the checkpointed: store it.
