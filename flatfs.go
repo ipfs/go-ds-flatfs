@@ -813,6 +813,9 @@ func (fs *Datastore) checkpointLoop() {
 			du := atomic.LoadInt64(&fs.diskUsage)
 			if !more { // shutting down
 				fs.writeDiskUsageFile(du)
+				if fs.dirty {
+					log.Errorf("could not right final value of disk usage to file, future estimates may be inaccurate")
+				}
 				fs.done <- true
 				return
 			}
@@ -844,19 +847,23 @@ func (fs *Datastore) checkpointLoop() {
 func (fs *Datastore) writeDiskUsageFile(du int64) {
 	tmp, err := ioutil.TempFile(fs.path, "du-")
 	if err != nil {
+		log.Warningf("cound not write disk usage: %v", err)
 		return
 	}
 
 	encoder := json.NewEncoder(tmp)
 	if err := encoder.Encode(&fs.storedValue); err != nil {
+		log.Warningf("cound not write disk usage: %v", err)
 		return
 	}
 
 	if err := tmp.Close(); err != nil {
+		log.Warningf("cound not write disk usage: %v", err)
 		return
 	}
 
 	if err := os.Rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile)); err != nil {
+		log.Warningf("cound not write disk usage: %v", err)
 		return
 	}
 
