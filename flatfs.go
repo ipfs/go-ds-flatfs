@@ -109,8 +109,8 @@ type Datastore struct {
 	dirty       bool
 	storedValue diskUsageValue
 
-	checkpointCh chan bool
-	done         chan bool
+	checkpointCh chan struct{}
+	done         chan struct{}
 
 	// opMap handles concurrent write operations (put/delete)
 	// to the same key
@@ -243,11 +243,9 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 		return nil, err
 	}
 
-	fs.checkpointCh = make(chan bool, 1)
-	fs.done = make(chan bool)
-	go func() {
-		fs.checkpointLoop()
-	}()
+	fs.checkpointCh = make(chan struct{}, 1)
+	fs.done = make(chan struct{})
+	go fs.checkpointLoop()
 	return fs, nil
 }
 
@@ -797,7 +795,7 @@ func (fs *Datastore) updateDiskUsage(path string, add bool) {
 
 func (fs *Datastore) checkpointDiskUsage() {
 	select {
-	case fs.checkpointCh <- true:
+	case fs.checkpointCh <- struct{}{}:
 		// msg sent
 	default:
 		// checkpoint request already pending
@@ -818,7 +816,7 @@ func (fs *Datastore) checkpointLoop() {
 				if fs.dirty {
 					log.Errorf("could not store final value of disk usage to file, future estimates may be inaccurate")
 				}
-				fs.done <- true
+				fs.done <- struct{}{}
 				return
 			}
 			// If the difference between the checkpointed disk usage and
@@ -834,6 +832,7 @@ func (fs *Datastore) checkpointLoop() {
 			// `diskUsageCheckpointTimeout`
 			if fs.dirty && !timerActive {
 				timer.Reset(diskUsageCheckpointTimeout)
+				timerActive = true
 			}
 		case <-timer.C:
 			timerActive = false
@@ -961,7 +960,6 @@ func (fs *Datastore) walk(path string, reschan chan query.Result) error {
 // function
 func (fs *Datastore) deactivate() error {
 	if fs.checkpointCh != nil {
-		fs.checkpointCh <- true
 		close(fs.checkpointCh)
 		<-fs.done
 		fs.checkpointCh = nil
