@@ -36,7 +36,7 @@ import "github.com/ipfs/go-ds-flatfs"
 Check the [GoDoc module documentation](https://godoc.org/github.com/ipfs/go-ds-flatfs) for an overview of this module's
 functionality.
 
-### DiskUsage and accuracy
+### DiskUsage and Accuracy
 
 This datastore implements the [`PersistentDatastore`](https://godoc.org/github.com/ipfs/go-datastore#PersistentDatastore) interface. It offers a `DiskUsage()` method which strives to find a balance between accuracy and performance. This implies:
 
@@ -53,19 +53,33 @@ written when the datastore is closed.
 This means that for certain datastores (huge ones, those with very slow disks or special content), the values reported by
 `DiskUsage()` might be reduced accuracy and the first startup (without a `diskUsage.cache` file present), might be slow.
 
-FIXME: Fix text, we now use a json file.
+If you need increased accuracy or a fast start from the first time, you can manually create or update the
+`diskUsage.cache` file.
 
-If you need increased accuracy or a fast start from the first time, you can replace the `diskUsage.cache` file (while the
-datastore is not open), with the right disk usage value in size. I.e., in the datastore root:
+The file `diskUsage.cache` is a JSON file with two fields `diskUsage` and `accuracy`.  For example the JSON file for a
+small repo might be:
+
+```
+{"diskUsage":6357,"accuracy":"initial-exact"}
+```
+
+`diskUsage` is the calculated disk usage and `accuracy` is a note on the accuracy of the initial calculation.  If the
+initial calculation was accurate the file will contain the value `initial-exact`.  If some of the directories have too
+many entries and the disk usage for that directory was estimated based on the first 2000 entries, the file will contain
+`initial-approximate`.  If the calculation took too long and timed out as indicated above, the file will contain
+`initial-timed-out`.
+
+If the initial calculation timed out the JSON file might be:
+```
+{"diskUsage":7589482442898,"accuracy":"initial-timed-out"}
+
+```
+
+To fix this with a more accurate value you could do (in the datastore root):
 
     $ du -sb .
-    3919232394        .
-    $ echo -n "3919232394" > diskUsage.cache
-
-The accuracy of the initial disk usage calculation is stored in the file `diskUsage.notes`.  This file is currently for reference only and
-not used in any other way.  If the initial calculation was accurate the file will contain the value `initial-exact`.  If some of the
-directories have too many entries and the disk usage for that directory was estimated based on the first 2000 entries, the file will contain
-`initial-approximate`.  If the calculation took too long and timed out as indicated above, the file will contain `initial-timed-out`.
+    7536515831332    .
+    $ echo -n '{"diskUsage":7536515831332,"accuracy":"initial-exact"}' > diskUsage.cache
 
 ## Contribute
 
