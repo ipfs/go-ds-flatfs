@@ -118,8 +118,8 @@ type Datastore struct {
 }
 
 type diskUsageValue struct {
-	diskUsage int64
-	accuracy  initAccuracy
+	DiskUsage int64        `json:"diskUsage"`
+	Accuracy  initAccuracy `json:"accuracy"`
 }
 
 type ShardFunc func(string) string
@@ -763,9 +763,9 @@ func (fs *Datastore) calculateDiskUsage() error {
 		fmt.Println("WARN: re-opening the datastore")
 	}
 
-	fs.storedValue.accuracy = accuracy
+	fs.storedValue.Accuracy = accuracy
 	fs.diskUsage = du
-	fs.writeDiskUsageFile(du)
+	fs.writeDiskUsageFile(du, true)
 
 	return nil
 }
@@ -812,7 +812,7 @@ func (fs *Datastore) checkpointLoop() {
 			du := atomic.LoadInt64(&fs.diskUsage)
 			fs.dirty = true
 			if !more { // shutting down
-				fs.writeDiskUsageFile(du)
+				fs.writeDiskUsageFile(du, true)
 				if fs.dirty {
 					log.Errorf("could not store final value of disk usage to file, future estimates may be inaccurate")
 				}
@@ -823,10 +823,10 @@ func (fs *Datastore) checkpointLoop() {
 			// current one is larger than than `diskUsageCheckpointPercent`
 			// of the checkpointed: store it.
 			newDu := float64(du)
-			lastCheckpointDu := float64(fs.storedValue.diskUsage)
+			lastCheckpointDu := float64(fs.storedValue.DiskUsage)
 			diff := math.Abs(newDu - lastCheckpointDu)
-			if (lastCheckpointDu * diskUsageCheckpointPercent / 100.0) < diff {
-				fs.writeDiskUsageFile(du)
+			if lastCheckpointDu*diskUsageCheckpointPercent < diff*100.0 {
+				fs.writeDiskUsageFile(du, false)
 			}
 			// Otherwise insure the value will be written to disk after
 			// `diskUsageCheckpointTimeout`
@@ -838,23 +838,32 @@ func (fs *Datastore) checkpointLoop() {
 			timerActive = false
 			if fs.dirty {
 				du := atomic.LoadInt64(&fs.diskUsage)
-				fs.writeDiskUsageFile(du)
+				fs.writeDiskUsageFile(du, false)
 			}
 		}
 	}
 }
 
-func (fs *Datastore) writeDiskUsageFile(du int64) {
+func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 	tmp, err := ioutil.TempFile(fs.path, "du-")
 	if err != nil {
 		log.Warningf("cound not write disk usage: %v", err)
 		return
 	}
 
+	toWrite := fs.storedValue
+	toWrite.DiskUsage = du
 	encoder := json.NewEncoder(tmp)
-	if err := encoder.Encode(&fs.storedValue); err != nil {
+	if err := encoder.Encode(&toWrite); err != nil {
 		log.Warningf("cound not write disk usage: %v", err)
 		return
+	}
+
+	if doSync {
+		if err := tmp.Sync(); err != nil {
+			log.Warningf("cound not sync %s: %v", DiskUsageFile, err)
+			return
+		}
 	}
 
 	if err := tmp.Close(); err != nil {
@@ -867,7 +876,7 @@ func (fs *Datastore) writeDiskUsageFile(du int64) {
 		return
 	}
 
-	fs.storedValue.diskUsage = du
+	fs.storedValue = toWrite
 	fs.dirty = false
 }
 
@@ -882,7 +891,7 @@ func (fs *Datastore) readDiskUsageFile() int64 {
 	if err != nil {
 		return 0
 	}
-	return fs.storedValue.diskUsage
+	return fs.storedValue.DiskUsage
 }
 
 // DiskUsage implements the PersistentDatastore interface
@@ -907,7 +916,7 @@ func (fs *Datastore) DiskUsage() (uint64, error) {
 // DiskUsage() result, the value returned is implementation defined
 // and for informational purposes only
 func (fs *Datastore) Accuracy() string {
-	return string(fs.storedValue.accuracy)
+	return string(fs.storedValue.Accuracy)
 }
 
 func (fs *Datastore) walk(path string, reschan chan query.Result) error {

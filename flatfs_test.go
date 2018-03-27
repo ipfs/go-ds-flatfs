@@ -2,6 +2,7 @@ package flatfs_test
 
 import (
 	"encoding/base32"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -397,7 +398,6 @@ func TestQuerySimple(t *testing.T) { tryAllShardFuncs(t, testQuerySimple) }
 
 func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
-	t.Log(temp)
 	defer cleanup()
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -445,15 +445,38 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	}
 	t.Log("duPostDelete:", duDelete)
 
-	// Make sure the accuracy value is correct
-	if fs.Accuracy() != "initial-exact" {
-		t.Errorf("Unexpected value for fs.Accuracy(): %s", fs.Accuracy())
+	du, err := fs.DiskUsage()
+	t.Log("duFinal:", du)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fs.Close()
+
+	// Check that disk usage file is correct
+	duB, err := ioutil.ReadFile(filepath.Join(temp, flatfs.DiskUsageFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := make(map[string]interface{})
+	err = json.Unmarshal(duB, &contents)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	fs.Close()
-	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
+	// Make sure diskUsage value is correct
+	if val, ok := contents["diskUsage"].(float64); !ok || uint64(val) != du {
+		t.Fatalf("Unexpected value for diskUsage in %s: %v (expected %d)",
+			flatfs.DiskUsageFile, contents["diskUsage"], du)
+	}
+
+	// Make sure the accuracy value is correct
+	if val, ok := contents["accuracy"].(string); !ok || val != "initial-exact" {
+		t.Fatalf("Unexpected value for accuracyin %s: %v",
+			flatfs.DiskUsageFile, contents["accuracy"])
+	}
 
 	// Make sure size is correctly calculated on re-open
+	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
 	fs, err = flatfs.Open(temp, false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
@@ -715,6 +738,19 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 	// Make sure the accuracy value is correct
 	if fs.Accuracy() != "initial-approximate" {
 		t.Errorf("Unexpected value for fs.Accuracy(): %s", fs.Accuracy())
+	}
+
+	fs.Close()
+
+	// Reopen into a new variable
+	fs2, err := flatfs.Open(temp, false)
+	if err != nil {
+		t.Fatalf("Open fail: %v\n", err)
+	}
+
+	// Make sure the accuracy value is preserved
+	if fs2.Accuracy() != "initial-approximate" {
+		t.Errorf("Unexpected value for fs.Accuracy(): %s", fs2.Accuracy())
 	}
 }
 
