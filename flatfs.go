@@ -58,12 +58,16 @@ const (
 type initAccuracy string
 
 const (
+	unknownA  initAccuracy = "unknown"
 	exactA    initAccuracy = "initial-exact"
 	approxA   initAccuracy = "initial-approximate"
 	timedoutA initAccuracy = "initial-timed-out"
 )
 
 func combineAccuracy(a, b initAccuracy) initAccuracy {
+	if a == unknownA || b == unknownA {
+		return unknownA
+	}
 	if a == timedoutA || b == timedoutA {
 		return timedoutA
 	}
@@ -73,7 +77,13 @@ func combineAccuracy(a, b initAccuracy) initAccuracy {
 	if a == exactA && b == exactA {
 		return exactA
 	}
-	return ""
+	if a == "" {
+		return b
+	}
+	if b == "" {
+		return a
+	}
+	return unknownA
 }
 
 var _ datastore.Datastore = (*Datastore)(nil)
