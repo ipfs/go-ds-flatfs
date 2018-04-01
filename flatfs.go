@@ -103,6 +103,11 @@ func init() {
 // write operations to the same key. See the explanation in
 // Put().
 type Datastore struct {
+	// atmoic operations should always be used with diskUsage.
+	// Must be first in struct to ensure correct alignment
+	// (see https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
+	diskUsage int64
+
 	path string
 
 	shardStr string
@@ -110,9 +115,6 @@ type Datastore struct {
 
 	// sychronize all writes and directory changes for added safety
 	sync bool
-
-	// atmoic operations should always be used with diskUsage
-	diskUsage int64
 
 	// these values should only be used during internalization or
 	// inside the checkpoint loop
