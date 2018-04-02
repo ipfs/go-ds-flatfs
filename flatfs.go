@@ -27,8 +27,9 @@ var log = logging.Logger("flatfs")
 
 const (
 	extension                  = ".data"
+	diskUsageMessageTimeout    = 5 * time.Second
 	diskUsageCheckpointPercent = 1.0
-	diskUsageCheckpointTimeout = 2.0 * time.Second
+	diskUsageCheckpointTimeout = 2 * time.Second
 )
 
 var (
@@ -761,11 +762,20 @@ func (fs *Datastore) calculateDiskUsage() error {
 		return nil
 	}
 
-	fmt.Printf("Calculating datastore size. This might take %s at most and will happen only once\n", DiskUsageCalcTimeout.String())
+	msgDone := make(chan struct{}, 1) // prevent race condition
+	msgTimer := time.AfterFunc(diskUsageMessageTimeout, func() {
+		fmt.Printf("Calculating datastore size. This might take %s at most and will happen only once\n",
+			DiskUsageCalcTimeout.String())
+		msgDone <- struct{}{}
+	})
+	defer msgTimer.Stop()
 	deadline := time.Now().Add(DiskUsageCalcTimeout)
 	du, accuracy, err := folderSize(fs.path, deadline)
 	if err != nil {
 		return err
+	}
+	if !msgTimer.Stop() {
+		<-msgDone
 	}
 	if accuracy == timedoutA {
 		fmt.Println("WARN: It took to long to calculate the datastore size")
