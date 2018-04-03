@@ -195,6 +195,7 @@ func populateDatastore(t *testing.T, dir string) ([]datastore.Key, [][]byte) {
 	if err != nil {
 		t.Fatalf("Open fail: %v\n", err)
 	}
+	defer ds.Close()
 
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	var blocks [][]byte
@@ -220,6 +221,7 @@ func checkKeys(t *testing.T, dir string, keys []datastore.Key, blocks [][]byte) 
 	if err != nil {
 		t.Fatalf("Open fail: %v\n", err)
 	}
+	defer ds.Close()
 
 	for i, key := range keys {
 		data, err := ds.Get(key)

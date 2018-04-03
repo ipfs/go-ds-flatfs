@@ -52,10 +52,12 @@ func Move(oldPath string, newPath string, out io.Writer) error {
 	if err != nil {
 		return fmt.Errorf("%s: %v", oldPath, err)
 	}
+	oldDS.deactivate()
 	newDS, err := Open(newPath, false)
 	if err != nil {
 		return fmt.Errorf("%s: %v", newPath, err)
 	}
+	newDS.deactivate()
 
 	res, err := oldDS.Query(query.Query{KeysOnly: true})
 	if err != nil {

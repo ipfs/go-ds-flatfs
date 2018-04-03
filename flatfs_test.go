@@ -2,6 +2,7 @@ package flatfs_test
 
 import (
 	"encoding/base32"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"math"
@@ -49,6 +50,7 @@ func TestPutBadValueType(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	err = fs.Put(datastore.NewKey("quux"), 22)
 	if g, e := err, datastore.ErrInvalidType; g != e {
@@ -66,6 +68,7 @@ func testPut(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	err = fs.Put(datastore.NewKey("quux"), []byte("foobar"))
 	if err != nil {
@@ -83,6 +86,7 @@ func testGet(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	const input = "foobar"
 	err = fs.Put(datastore.NewKey("quux"), []byte(input))
@@ -113,6 +117,7 @@ func testPutOverwrite(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	const (
 		loser  = "foobar"
@@ -147,6 +152,7 @@ func testGetNotFoundError(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	_, err = fs.Get(datastore.NewKey("quux"))
 	if g, e := err, datastore.ErrNotFound; g != e {
@@ -171,12 +177,14 @@ func testStorage(p *params, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	err = fs.Put(datastore.NewKey(p.key), []byte("foobar"))
 	if err != nil {
 		t.Fatalf("Put fail: %v\n", err)
 	}
 
+	fs.Close()
 	seen := false
 	haveREADME := false
 	walk := func(absPath string, fi os.FileInfo, err error) error {
@@ -262,6 +270,7 @@ func testHasNotFound(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	found, err := fs.Has(datastore.NewKey("quux"))
 	if err != nil {
@@ -282,6 +291,8 @@ func testHasFound(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
+
 	err = fs.Put(datastore.NewKey("quux"), []byte("foobar"))
 	if err != nil {
 		t.Fatalf("Put fail: %v\n", err)
@@ -306,6 +317,7 @@ func testDeleteNotFound(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	err = fs.Delete(datastore.NewKey("quux"))
 	if g, e := err, datastore.ErrNotFound; g != e {
@@ -323,6 +335,8 @@ func testDeleteFound(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
+
 	err = fs.Put(datastore.NewKey("quux"), []byte("foobar"))
 	if err != nil {
 		t.Fatalf("Put fail: %v\n", err)
@@ -350,6 +364,8 @@ func testQuerySimple(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
+
 	const myKey = "quux"
 	err = fs.Put(datastore.NewKey(myKey), []byte("foobar"))
 	if err != nil {
@@ -382,13 +398,13 @@ func TestQuerySimple(t *testing.T) { tryAllShardFuncs(t, testQuerySimple) }
 
 func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
-	t.Log(temp)
 	defer cleanup()
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	time.Sleep(100 * time.Millisecond)
 	duNew, err := fs.DiskUsage()
@@ -429,10 +445,38 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	}
 	t.Log("duPostDelete:", duDelete)
 
+	du, err := fs.DiskUsage()
+	t.Log("duFinal:", du)
+	if err != nil {
+		t.Fatal(err)
+	}
 	fs.Close()
-	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
+
+	// Check that disk usage file is correct
+	duB, err := ioutil.ReadFile(filepath.Join(temp, flatfs.DiskUsageFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	contents := make(map[string]interface{})
+	err = json.Unmarshal(duB, &contents)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Make sure diskUsage value is correct
+	if val, ok := contents["diskUsage"].(float64); !ok || uint64(val) != du {
+		t.Fatalf("Unexpected value for diskUsage in %s: %v (expected %d)",
+			flatfs.DiskUsageFile, contents["diskUsage"], du)
+	}
+
+	// Make sure the accuracy value is correct
+	if val, ok := contents["accuracy"].(string); !ok || val != "initial-exact" {
+		t.Fatalf("Unexpected value for accuracyin %s: %v",
+			flatfs.DiskUsageFile, contents["accuracy"])
+	}
 
 	// Make sure size is correctly calculated on re-open
+	os.Remove(filepath.Join(temp, flatfs.DiskUsageFile))
 	fs, err = flatfs.Open(temp, false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
@@ -481,6 +525,7 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	var count int
 	var wg sync.WaitGroup
@@ -553,6 +598,7 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	fsBatch, _ := fs.Batch()
 
@@ -634,6 +680,7 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	count := 50000
 	for i := 0; i < count; i++ {
@@ -687,6 +734,24 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 	if diff > maxDiff {
 		t.Fatal("expected a better estimation within 5%")
 	}
+
+	// Make sure the accuracy value is correct
+	if fs.Accuracy() != "initial-approximate" {
+		t.Errorf("Unexpected value for fs.Accuracy(): %s", fs.Accuracy())
+	}
+
+	fs.Close()
+
+	// Reopen into a new variable
+	fs2, err := flatfs.Open(temp, false)
+	if err != nil {
+		t.Fatalf("Open fail: %v\n", err)
+	}
+
+	// Make sure the accuracy value is preserved
+	if fs2.Accuracy() != "initial-approximate" {
+		t.Errorf("Unexpected value for fs.Accuracy(): %s", fs2.Accuracy())
+	}
 }
 
 func TestDiskUsageEstimation(t *testing.T) { tryAllShardFuncs(t, testDiskUsageEstimation) }
@@ -699,6 +764,7 @@ func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	dstest.RunBatchTest(t, fs)
 }
@@ -713,6 +779,7 @@ func testBatchDelete(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	dstest.RunBatchDeleteTest(t, fs)
 }
@@ -778,6 +845,7 @@ func TestNoCluster(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	r := rand.New(rand.NewSource(0))
 	N := 3200 // should be divisible by 32 so the math works out
@@ -792,6 +860,7 @@ func TestNoCluster(t *testing.T) {
 		}
 	}
 
+	fs.Close()
 	dirs, err := ioutil.ReadDir(tempdir)
 	if err != nil {
 		t.Fatalf("ReadDir fail: %v\n", err)
@@ -840,6 +909,7 @@ func BenchmarkConsecutivePut(b *testing.B) {
 	if err != nil {
 		b.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	b.ResetTimer()
 
@@ -871,6 +941,7 @@ func BenchmarkBatchedPut(b *testing.B) {
 	if err != nil {
 		b.Fatalf("New fail: %v\n", err)
 	}
+	defer fs.Close()
 
 	b.ResetTimer()
 
