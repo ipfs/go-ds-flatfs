@@ -24,6 +24,6 @@
   "license": "",
   "name": "go-ds-flatfs",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "1.2.2"
+  "version": "1.2.3"
 }
 
