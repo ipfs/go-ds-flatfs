@@ -8,9 +8,9 @@
   },
   "gxDependencies": [
     {
-      "hash": "QmTG23dvpBCBjqQwyDxV8CQT6jmS4PSftNr1VqHhE3MLy7",
+      "hash": "QmTsjVoib7EJhT7tmcqKPhEaATcxd6UVZu2qxdthk85vvv",
       "name": "go-log",
-      "version": "1.4.1"
+      "version": "1.5.1"
     },
     {
       "author": "jbenet",
@@ -24,6 +24,6 @@
   "license": "",
   "name": "go-ds-flatfs",
   "releaseCmd": "git commit -a -m \"gx publish $VERSION\"",
-  "version": "1.2.4"
+  "version": "1.2.5"
 }
 
