@@ -1,23 +1,25 @@
 os:
-    - linux
-    - osx
+  - linux
+  - osx
+
+sudo: false
 
 language: go
 
 go:
-    - 1.9.2
+    - 1.9.x
 
-install: true
+install:
+  - make deps
 
 script:
-    - make deps
-    - gx-go rewrite
-    - go test -v -race -coverprofile=unittest.coverprofile -covermode=atomic .
-
-
-after_success:
-    - bash <(curl -s https://codecov.io/bash) -f unittest.coverprofile -F unittest
+  - bash <(curl -s https://raw.githubusercontent.com/ipfs/ci-helpers/master/travis-ci/run-standard-tests.sh)
 
 cache:
     directories:
         - $GOPATH/src/gx
+
+notifications:
+  email: false
+
+env: GOTFLAGS="-race -cpu=5"
