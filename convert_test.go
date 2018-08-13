@@ -228,7 +228,7 @@ func checkKeys(t *testing.T, dir string, keys []datastore.Key, blocks [][]byte) 
 		if err != nil {
 			t.Fatalf("Get fail: %v\n", err)
 		}
-		if !bytes.Equal(data.([]byte), blocks[i]) {
+		if !bytes.Equal(data, blocks[i]) {
 			t.Fatalf("block context differ for key %s\n", key.String())
 		}
 	}
