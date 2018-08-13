@@ -42,22 +42,6 @@ func tryAllShardFuncs(t *testing.T, testFunc func(mkShardFunc, *testing.T)) {
 	t.Run("next-to-last", func(t *testing.T) { testFunc(flatfs.NextToLast, t) })
 }
 
-func TestPutBadValueType(t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
-
-	fs, err := flatfs.CreateOrOpen(temp, flatfs.Prefix(2), false)
-	if err != nil {
-		t.Fatalf("New fail: %v\n", err)
-	}
-	defer fs.Close()
-
-	err = fs.Put(datastore.NewKey("quux"), 22)
-	if g, e := err, datastore.ErrInvalidType; g != e {
-		t.Fatalf("expected ErrInvalidType, got: %v\n", g)
-	}
-}
-
 type mkShardFunc func(int) *flatfs.ShardIdV1
 
 func testPut(dirFunc mkShardFunc, t *testing.T) {
@@ -94,13 +78,9 @@ func testGet(dirFunc mkShardFunc, t *testing.T) {
 		t.Fatalf("Put fail: %v\n", err)
 	}
 
-	data, err := fs.Get(datastore.NewKey("quux"))
+	buf, err := fs.Get(datastore.NewKey("quux"))
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
-	}
-	buf, ok := data.([]byte)
-	if !ok {
-		t.Fatalf("expected []byte from Get, got %T: %v", data, data)
 	}
 	if g, e := string(buf), input; g != e {
 		t.Fatalf("Get gave wrong content: %q != %q", g, e)
@@ -137,7 +117,7 @@ func testPutOverwrite(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
-	if g, e := string(data.([]byte)), winner; g != e {
+	if g, e := string(data), winner; g != e {
 		t.Fatalf("Get gave wrong content: %q != %q", g, e)
 	}
 }
@@ -732,7 +712,7 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 	maxDiff := int(0.05 * float64(duReopen)) // %5 of actual
 
 	if diff > maxDiff {
-		t.Fatal("expected a better estimation within 5%")
+		t.Fatalf("expected a better estimation within 5%%")
 	}
 
 	// Make sure the accuracy value is correct
