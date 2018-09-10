@@ -863,6 +863,11 @@ func (fs *Datastore) checkpointLoop() {
 
 func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 	tmp, err := ioutil.TempFile(fs.path, "du-")
+	if err != nil {
+		log.Warningf("cound not write disk usage: %v", err)
+		return
+	}
+
 	removed := false
 	defer func() {
 		if !removed {
@@ -870,10 +875,6 @@ func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 			_ = os.Remove(tmp.Name())
 		}
 	}()
-	if err != nil {
-		log.Warningf("cound not write disk usage: %v", err)
-		return
-	}
 
 	toWrite := fs.storedValue
 	toWrite.DiskUsage = du
