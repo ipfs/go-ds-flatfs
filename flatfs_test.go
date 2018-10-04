@@ -289,6 +289,50 @@ func testHasFound(dirFunc mkShardFunc, t *testing.T) {
 
 func TestHasFound(t *testing.T) { tryAllShardFuncs(t, testHasFound) }
 
+func testGetSizeFound(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+	defer fs.Close()
+
+	_, err = fs.GetSize(datastore.NewKey("quux"))
+	if err != datastore.ErrNotFound {
+		t.Fatalf("GetSize should have returned ErrNotFound, got: %v\n", err)
+	}
+}
+
+func TestGetSizeFound(t *testing.T) { tryAllShardFuncs(t, testGetSizeFound) }
+
+func testGetSizeNotFound(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+	defer fs.Close()
+
+	err = fs.Put(datastore.NewKey("quux"), []byte("foobar"))
+	if err != nil {
+		t.Fatalf("Put fail: %v\n", err)
+	}
+
+	size, err := fs.GetSize(datastore.NewKey("quux"))
+	if err != nil {
+		t.Fatalf("GetSize failed with: %v\n", err)
+	}
+	if size != len("foobar") {
+		t.Fatalf("GetSize returned wrong size: got %d, expected %d", size, len("foobar"))
+	}
+}
+
+func TestGetSizeNotFound(t *testing.T) { tryAllShardFuncs(t, testGetSizeNotFound) }
+
 func testDeleteNotFound(dirFunc mkShardFunc, t *testing.T) {
 	temp, cleanup := tempdir(t)
 	defer cleanup()
