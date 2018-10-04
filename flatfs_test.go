@@ -256,8 +256,8 @@ func testHasNotFound(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("Has fail: %v\n", err)
 	}
-	if g, e := found, false; g != e {
-		t.Fatalf("wrong Has: %v != %v", g, e)
+	if found {
+		t.Fatal("Has should have returned false")
 	}
 }
 
@@ -282,8 +282,8 @@ func testHasFound(dirFunc mkShardFunc, t *testing.T) {
 	if err != nil {
 		t.Fatalf("Has fail: %v\n", err)
 	}
-	if g, e := found, true; g != e {
-		t.Fatalf("wrong Has: %v != %v", g, e)
+	if !found {
+		t.Fatal("Has should have returned true")
 	}
 }
 
