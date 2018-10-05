@@ -577,6 +577,18 @@ func (fs *Datastore) Has(key datastore.Key) (exists bool, err error) {
 	}
 }
 
+func (fs *Datastore) GetSize(key datastore.Key) (size int, err error) {
+	_, path := fs.encode(key)
+	switch s, err := os.Stat(path); {
+	case err == nil:
+		return int(s.Size()), nil
+	case os.IsNotExist(err):
+		return -1, datastore.ErrNotFound
+	default:
+		return -1, err
+	}
+}
+
 // Delete removes a key/value from the Datastore. Please read
 // the Put() explanation about the handling of concurrent write
 // operations to the same key.
