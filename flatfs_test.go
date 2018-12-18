@@ -988,3 +988,34 @@ func BenchmarkBatchedPut(b *testing.B) {
 	}
 	b.StopTimer() // avoid counting cleanup
 }
+
+func TestQueryLeak(t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, flatfs.Prefix(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+	defer fs.Close()
+
+	for i := 0; i < 1000; i++ {
+		err = fs.Put(datastore.NewKey(fmt.Sprint(i)), []byte("foobar"))
+		if err != nil {
+			t.Fatalf("Put fail: %v\n", err)
+		}
+	}
+
+	before := runtime.NumGoroutine()
+	for i := 0; i < 200; i++ {
+		res, err := fs.Query(query.Query{KeysOnly: true})
+		if err != nil {
+			t.Errorf("Query fail: %v\n", err)
+		}
+		res.Close()
+	}
+	after := runtime.NumGoroutine()
+	if after-before > 100 {
+		t.Errorf("leaked %d goroutines", after-before)
+	}
+}
