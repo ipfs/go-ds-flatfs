@@ -476,7 +476,7 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 	return nil
 }
 
-func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
+func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 	fs.shutdownLock.RLock()
 	defer fs.shutdownLock.RUnlock()
 	if fs.shutdown {
@@ -484,40 +484,12 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 	}
 
 	var dirsToSync []string
-	files := make(map[*os.File]*op)
 
-	for key, value := range data {
-		val, ok := value.([]byte)
-		if !ok {
-			return datastore.ErrInvalidType
-		}
-		dir, path := fs.encode(key)
-		if err := fs.makeDirNoSync(dir); err != nil {
-			return err
-		}
-		dirsToSync = append(dirsToSync, dir)
-
-		tmp, err := ioutil.TempFile(dir, "put-")
-		if err != nil {
-			return err
-		}
-
-		if _, err := tmp.Write(val); err != nil {
-			return err
-		}
-
-		files[tmp] = &op{
-			typ:  opRename,
-			path: path,
-			tmp:  tmp.Name(),
-			key:  key,
-		}
-	}
-
-	ops := make(map[*os.File]int)
+	files := make(map[*os.File]*op, len(data))
+	ops := make(map[*os.File]int, len(data))
 
 	defer func() {
-		for fi, _ := range files {
+		for fi := range files {
 			val, _ := ops[fi]
 			switch val {
 			case 0:
@@ -529,9 +501,33 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 		}
 	}()
 
+	for key, value := range data {
+		dir, path := fs.encode(key)
+		if err := fs.makeDirNoSync(dir); err != nil {
+			return err
+		}
+		dirsToSync = append(dirsToSync, dir)
+
+		tmp, err := ioutil.TempFile(dir, "put-")
+		if err != nil {
+			return err
+		}
+
+		if _, err := tmp.Write(value); err != nil {
+			return err
+		}
+
+		files[tmp] = &op{
+			typ:  opRename,
+			path: path,
+			tmp:  tmp.Name(),
+			key:  key,
+		}
+	}
+
 	// Now we sync everything
 	// sync and close files
-	for fi, _ := range files {
+	for fi := range files {
 		if fs.sync {
 			if err := syncFile(fi); err != nil {
 				return err
@@ -548,7 +544,10 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 
 	// move files to their proper places
 	for fi, op := range files {
-		fs.doWriteOp(op)
+		err := fs.doWriteOp(op)
+		if err != nil {
+			return err
+		}
 		// signify removed
 		ops[fi] = 2
 	}
@@ -1063,7 +1062,7 @@ func (fs *Datastore) Close() error {
 }
 
 type flatfsBatch struct {
-	puts    map[datastore.Key]interface{}
+	puts    map[datastore.Key][]byte
 	deletes map[datastore.Key]struct{}
 
 	ds *Datastore
@@ -1071,7 +1070,7 @@ type flatfsBatch struct {
 
 func (fs *Datastore) Batch() (datastore.Batch, error) {
 	return &flatfsBatch{
-		puts:    make(map[datastore.Key]interface{}),
+		puts:    make(map[datastore.Key][]byte),
 		deletes: make(map[datastore.Key]struct{}),
 		ds:      fs,
 	}, nil
