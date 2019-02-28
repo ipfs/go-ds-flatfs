@@ -170,8 +170,8 @@ func Move(oldPath string, newPath string, out io.Writer) error {
 func moveKey(oldDS *Datastore, newDS *Datastore, key datastore.Key) error {
 	_, oldPath := oldDS.encode(key)
 	dir, newPath := newDS.encode(key)
-	err := newDS.makeDirNoSync(dir)
-	if err != nil {
+	err := os.Mkdir(dir, 0755)
+	if err != nil && !os.IsExist(err) {
 		return err
 	}
 	err = os.Rename(oldPath, newPath)
