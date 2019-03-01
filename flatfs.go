@@ -94,6 +94,7 @@ var (
 	ErrDatastoreExists       = errors.New("datastore already exists")
 	ErrDatastoreDoesNotExist = errors.New("datastore directory does not exist")
 	ErrShardingFileMissing   = fmt.Errorf("%s file not found in datastore", SHARDING_FN)
+	ErrClosed                = errors.New("datastore closed")
 )
 
 func init() {
@@ -123,8 +124,12 @@ type Datastore struct {
 	dirty       bool
 	storedValue diskUsageValue
 
+	// Used to trigger a checkpoint.
 	checkpointCh chan struct{}
 	done         chan struct{}
+
+	shutdownLock sync.RWMutex
+	shutdown     bool
 
 	// opMap handles concurrent write operations (put/delete)
 	// to the same key
@@ -238,12 +243,14 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 	}
 
 	fs := &Datastore{
-		path:      path,
-		shardStr:  shardId.String(),
-		getDir:    shardId.Func(),
-		sync:      syncFiles,
-		diskUsage: 0,
-		opMap:     new(opMap),
+		path:         path,
+		shardStr:     shardId.String(),
+		getDir:       shardId.Func(),
+		sync:         syncFiles,
+		checkpointCh: make(chan struct{}, 1),
+		done:         make(chan struct{}),
+		diskUsage:    0,
+		opMap:        new(opMap),
 	}
 
 	// This sets diskUsage to the correct value
@@ -257,8 +264,6 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 		return nil, err
 	}
 
-	fs.checkpointCh = make(chan struct{}, 1)
-	fs.done = make(chan struct{})
 	go fs.checkpointLoop()
 	return fs, nil
 }
@@ -356,6 +361,12 @@ var putMaxRetries = 6
 // concurrent Put and a Delete operation, we cannot guarantee which one
 // will win.
 func (fs *Datastore) Put(key datastore.Key, value []byte) error {
+	fs.shutdownLock.RLock()
+	defer fs.shutdownLock.RUnlock()
+	if fs.shutdown {
+		return ErrClosed
+	}
+
 	var err error
 	for i := 1; i <= putMaxRetries; i++ {
 		err = fs.doWriteOp(&op{
@@ -465,42 +476,20 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 	return nil
 }
 
-func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
-	var dirsToSync []string
-	files := make(map[*os.File]*op)
-
-	for key, value := range data {
-		val, ok := value.([]byte)
-		if !ok {
-			return datastore.ErrInvalidType
-		}
-		dir, path := fs.encode(key)
-		if err := fs.makeDirNoSync(dir); err != nil {
-			return err
-		}
-		dirsToSync = append(dirsToSync, dir)
-
-		tmp, err := ioutil.TempFile(dir, "put-")
-		if err != nil {
-			return err
-		}
-
-		if _, err := tmp.Write(val); err != nil {
-			return err
-		}
-
-		files[tmp] = &op{
-			typ:  opRename,
-			path: path,
-			tmp:  tmp.Name(),
-			key:  key,
-		}
+func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
+	fs.shutdownLock.RLock()
+	defer fs.shutdownLock.RUnlock()
+	if fs.shutdown {
+		return ErrClosed
 	}
 
-	ops := make(map[*os.File]int)
+	var dirsToSync []string
+
+	files := make(map[*os.File]*op, len(data))
+	ops := make(map[*os.File]int, len(data))
 
 	defer func() {
-		for fi, _ := range files {
+		for fi := range files {
 			val, _ := ops[fi]
 			switch val {
 			case 0:
@@ -512,9 +501,33 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 		}
 	}()
 
+	for key, value := range data {
+		dir, path := fs.encode(key)
+		if err := fs.makeDirNoSync(dir); err != nil {
+			return err
+		}
+		dirsToSync = append(dirsToSync, dir)
+
+		tmp, err := ioutil.TempFile(dir, "put-")
+		if err != nil {
+			return err
+		}
+
+		if _, err := tmp.Write(value); err != nil {
+			return err
+		}
+
+		files[tmp] = &op{
+			typ:  opRename,
+			path: path,
+			tmp:  tmp.Name(),
+			key:  key,
+		}
+	}
+
 	// Now we sync everything
 	// sync and close files
-	for fi, _ := range files {
+	for fi := range files {
 		if fs.sync {
 			if err := syncFile(fi); err != nil {
 				return err
@@ -531,7 +544,10 @@ func (fs *Datastore) putMany(data map[datastore.Key]interface{}) error {
 
 	// move files to their proper places
 	for fi, op := range files {
-		fs.doWriteOp(op)
+		err := fs.doWriteOp(op)
+		if err != nil {
+			return err
+		}
 		// signify removed
 		ops[fi] = 2
 	}
@@ -594,6 +610,12 @@ func (fs *Datastore) GetSize(key datastore.Key) (size int, err error) {
 // the Put() explanation about the handling of concurrent write
 // operations to the same key.
 func (fs *Datastore) Delete(key datastore.Key) error {
+	fs.shutdownLock.RLock()
+	defer fs.shutdownLock.RUnlock()
+	if fs.shutdown {
+		return ErrClosed
+	}
+
 	return fs.doWriteOp(&op{
 		typ: opDelete,
 		key: key,
@@ -845,6 +867,8 @@ func (fs *Datastore) checkpointDiskUsage() {
 }
 
 func (fs *Datastore) checkpointLoop() {
+	defer close(fs.done)
+
 	timerActive := true
 	timer := time.NewTimer(0)
 	defer timer.Stop()
@@ -858,7 +882,6 @@ func (fs *Datastore) checkpointLoop() {
 				if fs.dirty {
 					log.Errorf("could not store final value of disk usage to file, future estimates may be inaccurate")
 				}
-				fs.done <- struct{}{}
 				return
 			}
 			// If the difference between the checkpointed disk usage and
@@ -1023,11 +1046,14 @@ func (fs *Datastore) walk(path string, result *query.ResultBuilder) error {
 // operations will fail but readonly operations will continue to
 // function
 func (fs *Datastore) deactivate() error {
-	if fs.checkpointCh != nil {
-		close(fs.checkpointCh)
-		<-fs.done
-		fs.checkpointCh = nil
+	fs.shutdownLock.Lock()
+	defer fs.shutdownLock.Unlock()
+	if fs.shutdown {
+		return nil
 	}
+	fs.shutdown = true
+	close(fs.checkpointCh)
+	<-fs.done
 	return nil
 }
 
@@ -1036,7 +1062,7 @@ func (fs *Datastore) Close() error {
 }
 
 type flatfsBatch struct {
-	puts    map[datastore.Key]interface{}
+	puts    map[datastore.Key][]byte
 	deletes map[datastore.Key]struct{}
 
 	ds *Datastore
@@ -1044,7 +1070,7 @@ type flatfsBatch struct {
 
 func (fs *Datastore) Batch() (datastore.Batch, error) {
 	return &flatfsBatch{
-		puts:    make(map[datastore.Key]interface{}),
+		puts:    make(map[datastore.Key][]byte),
 		deletes: make(map[datastore.Key]struct{}),
 		ds:      fs,
 	}, nil

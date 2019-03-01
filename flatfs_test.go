@@ -810,6 +810,30 @@ func testBatchDelete(dirFunc mkShardFunc, t *testing.T) {
 
 func TestBatchDelete(t *testing.T) { tryAllShardFuncs(t, testBatchDelete) }
 
+func testClose(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+
+	err = fs.Put(datastore.NewKey("quux"), []byte("foobar"))
+	if err != nil {
+		t.Fatalf("Put fail: %v\n", err)
+	}
+
+	fs.Close()
+
+	err = fs.Put(datastore.NewKey("qaax"), []byte("foobar"))
+	if err == nil {
+		t.Fatal("expected put on closed datastore to fail")
+	}
+}
+
+func TestClose(t *testing.T) { tryAllShardFuncs(t, testClose) }
+
 func TestSHARDINGFile(t *testing.T) {
 	tempdir, cleanup := tempdir(t)
 	defer cleanup()
