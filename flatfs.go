@@ -1099,7 +1099,3 @@ func (bt *flatfsBatch) Commit() error {
 
 	return nil
 }
-
-var _ datastore.ThreadSafeDatastore = (*Datastore)(nil)
-
-func (*Datastore) IsThreadSafe() {}
