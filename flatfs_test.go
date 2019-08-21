@@ -344,8 +344,8 @@ func testDeleteNotFound(dirFunc mkShardFunc, t *testing.T) {
 	defer fs.Close()
 
 	err = fs.Delete(datastore.NewKey("quux"))
-	if g, e := err, datastore.ErrNotFound; g != e {
-		t.Fatalf("expected ErrNotFound, got: %v\n", g)
+	if err != nil {
+		t.Fatalf("expected nil, got: %v\n", err)
 	}
 }
 

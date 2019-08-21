@@ -636,7 +636,7 @@ func (fs *Datastore) doDelete(key datastore.Key) error {
 		fs.checkpointDiskUsage()
 		return nil
 	case os.IsNotExist(err):
-		return datastore.ErrNotFound
+		return nil
 	default:
 		return err
 	}
