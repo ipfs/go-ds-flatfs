@@ -490,7 +490,7 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 
 	defer func() {
 		for fi := range files {
-			val, _ := ops[fi]
+			val := ops[fi]
 			switch val {
 			case 0:
 				_ = fi.Close()
@@ -667,7 +667,7 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 		case <-p.Closing():
 		}
 	})
-	go b.Process.CloseAfterChildren()
+	go b.Process.CloseAfterChildren() //nolint
 
 	return b.Results(), nil
 }
@@ -1045,20 +1045,20 @@ func (fs *Datastore) walk(path string, result *query.ResultBuilder) error {
 // Deactivate closes background maintenance threads, most write
 // operations will fail but readonly operations will continue to
 // function
-func (fs *Datastore) deactivate() error {
+func (fs *Datastore) deactivate() {
 	fs.shutdownLock.Lock()
 	defer fs.shutdownLock.Unlock()
 	if fs.shutdown {
-		return nil
+		return
 	}
 	fs.shutdown = true
 	close(fs.checkpointCh)
 	<-fs.done
-	return nil
 }
 
 func (fs *Datastore) Close() error {
-	return fs.deactivate()
+	fs.deactivate()
+	return nil
 }
 
 type flatfsBatch struct {
@@ -1091,7 +1091,7 @@ func (bt *flatfsBatch) Commit() error {
 		return err
 	}
 
-	for k, _ := range bt.deletes {
+	for k := range bt.deletes {
 		if err := bt.ds.Delete(k); err != nil {
 			return err
 		}

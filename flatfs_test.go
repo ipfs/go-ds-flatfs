@@ -561,7 +561,7 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 			v := []byte("10bytes---")
 			err := fs.Put(testKey, v)
 			if err != nil {
-				t.Fatalf("Put fail: %v\n", err)
+				t.Errorf("Put fail: %v\n", err)
 			}
 		}
 	}
@@ -571,7 +571,7 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 		for i := 0; i < count; i++ {
 			err := fs.Delete(testKey)
 			if err != nil && !strings.Contains(err.Error(), "key not found") {
-				t.Fatalf("Delete fail: %v\n", err)
+				t.Errorf("Delete fail: %v\n", err)
 			}
 		}
 	}
@@ -624,7 +624,10 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 	}
 	defer fs.Close()
 
-	fsBatch, _ := fs.Batch()
+	fsBatch, err := fs.Batch()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	count := 200
 	var wg sync.WaitGroup
@@ -636,14 +639,17 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 
 	put := func() {
 		for i := 0; i < count; i++ {
-			fsBatch.Put(testKeys[i], []byte("10bytes---"))
+			err := fsBatch.Put(testKeys[i], []byte("10bytes---"))
+			if err != nil {
+				t.Error(err)
+			}
 		}
 	}
 	commit := func() {
 		defer wg.Done()
 		err := fsBatch.Commit()
 		if err != nil {
-			t.Fatalf("Batch Put fail: %v\n", err)
+			t.Errorf("Batch Put fail: %v\n", err)
 		}
 	}
 
@@ -652,7 +658,7 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 		for _, k := range testKeys {
 			err := fs.Delete(k)
 			if err != nil && !strings.Contains(err.Error(), "key not found") {
-				t.Fatalf("Delete fail: %v\n", err)
+				t.Errorf("Delete fail: %v\n", err)
 			}
 		}
 	}
@@ -662,9 +668,15 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 	wg.Add(2)
 	put()
 	commit()
-	du, _ := fs.DiskUsage()
+	du, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
 	del()
-	du2, _ := fs.DiskUsage()
+	du2, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if du-uint64(10*count) != du2 {
 		t.Errorf("should have deleted exactly %d bytes: %d %d", 10*count, du, du2)
 	}
@@ -676,11 +688,17 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 	go del()
 	wg.Wait()
 
-	du3, _ := fs.DiskUsage()
+	du3, err := fs.DiskUsage()
+	if err != nil {
+		t.Fatal(err)
+	}
 	// Now query how many keys we have
 	results, err := fs.Query(query.Query{
 		KeysOnly: true,
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	rest, err := results.Rest()
 	if err != nil {
 		t.Fatal(err)
@@ -862,6 +880,7 @@ func TestSHARDINGFile(t *testing.T) {
 
 	fs, err = flatfs.CreateOrOpen(tempdir, flatfs.Prefix(5), false)
 	if err == nil {
+		fs.Close()
 		t.Fatalf("Was able to open repo with incompatible sharding function")
 	}
 }
@@ -877,9 +896,12 @@ func TestNonDatastoreDir(t *testing.T) {
 	tempdir, cleanup := tempdir(t)
 	defer cleanup()
 
-	ioutil.WriteFile(filepath.Join(tempdir, "afile"), []byte("Some Content"), 0644)
+	err := ioutil.WriteFile(filepath.Join(tempdir, "afile"), []byte("Some Content"), 0644)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	err := flatfs.Create(tempdir, flatfs.NextToLast(2))
+	err = flatfs.Create(tempdir, flatfs.NextToLast(2))
 	if err == nil {
 		t.Fatalf("Expected an error when creating a datastore in a non-empty directory")
 	}
