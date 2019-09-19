@@ -13,6 +13,10 @@
 
 `go-ds-flatfs` is used by `go-ipfs` to store raw block contents on disk. It supports several sharding functions (prefix, suffix, next-to-last/*).
 
+## Lead Maintainer
+
+[Jakub Sztandera](https://github.com/kubuxu)
+
 ## Table of Contents
 
 - [Install](#install)
