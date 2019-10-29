@@ -912,7 +912,7 @@ func (fs *Datastore) checkpointLoop() {
 func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 	tmp, err := ioutil.TempFile(fs.path, "du-")
 	if err != nil {
-		log.Warningf("cound not write disk usage: %v", err)
+		log.Warnf("cound not write disk usage: %v", err)
 		return
 	}
 
@@ -928,24 +928,24 @@ func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 	toWrite.DiskUsage = du
 	encoder := json.NewEncoder(tmp)
 	if err := encoder.Encode(&toWrite); err != nil {
-		log.Warningf("cound not write disk usage: %v", err)
+		log.Warnf("cound not write disk usage: %v", err)
 		return
 	}
 
 	if doSync {
 		if err := tmp.Sync(); err != nil {
-			log.Warningf("cound not sync %s: %v", DiskUsageFile, err)
+			log.Warnf("cound not sync %s: %v", DiskUsageFile, err)
 			return
 		}
 	}
 
 	if err := tmp.Close(); err != nil {
-		log.Warningf("cound not write disk usage: %v", err)
+		log.Warnf("cound not write disk usage: %v", err)
 		return
 	}
 
 	if err := os.Rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile)); err != nil {
-		log.Warningf("cound not write disk usage: %v", err)
+		log.Warnf("cound not write disk usage: %v", err)
 		return
 	}
 	removed = true
@@ -1025,7 +1025,7 @@ func (fs *Datastore) walk(path string, result *query.ResultBuilder) error {
 
 		key, ok := fs.decode(fn)
 		if !ok {
-			log.Warningf("failed to decode flatfs entry: %s", fn)
+			log.Warnf("failed to decode flatfs entry: %s", fn)
 			continue
 		}
 
