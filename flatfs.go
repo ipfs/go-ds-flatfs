@@ -401,10 +401,10 @@ func (fs *Datastore) doOp(oper *op) error {
 	}
 }
 
-// doWrite optmizes out write operations (put/delete) to the same
-// key by queueing them and suceeding all queued
+// doWrite optimizes out write operations (put/delete) to the same
+// key by queueing them and succeeding all queued
 // operations if one of them does. In such case,
-// we assume that the first suceeding operation
+// we assume that the first succeeding operation
 // on that key was the last one to happen after
 // all successful others.
 func (fs *Datastore) doWriteOp(oper *op) error {
@@ -648,7 +648,9 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 		len(q.Orders) > 0 ||
 		q.Limit > 0 ||
 		q.Offset > 0 ||
-		!q.KeysOnly {
+		!q.KeysOnly ||
+		q.ReturnExpirations ||
+		q.ReturnsSizes {
 		// TODO this is overly simplistic, but the only caller is
 		// `ipfs refs local` for now, and this gets us moving.
 		return nil, errors.New("flatfs only supports listing all keys in random order")
@@ -703,8 +705,8 @@ func (fs *Datastore) walkTopLevel(path string, result *query.ResultBuilder) erro
 }
 
 // folderSize estimates the diskUsage of a folder by reading
-// up to DiskUsageFilesAverage entries in it and assumming any
-// other files will have an avereage size.
+// up to DiskUsageFilesAverage entries in it and assuming any
+// other files will have an average size.
 func folderSize(path string, deadline time.Time) (int64, initAccuracy, error) {
 	var du int64
 
