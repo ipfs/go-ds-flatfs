@@ -388,6 +388,16 @@ func (fs *Datastore) Put(key datastore.Key, value []byte) error {
 	return err
 }
 
+func (fs *Datastore) Sync(prefix datastore.Key) error {
+	fs.shutdownLock.RLock()
+	defer fs.shutdownLock.RUnlock()
+	if fs.shutdown {
+		return ErrClosed
+	}
+
+	return nil
+}
+
 func (fs *Datastore) doOp(oper *op) error {
 	switch oper.typ {
 	case opPut:
