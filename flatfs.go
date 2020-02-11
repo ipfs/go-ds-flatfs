@@ -654,14 +654,16 @@ func (fs *Datastore) doDelete(key datastore.Key) error {
 
 func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 	prefix := datastore.NewKey(q.Prefix).String()
-	if (prefix != "/") ||
-		len(q.Filters) > 0 ||
+	if prefix != "/" {
+		// This datastore can't include keys with multiple components.
+		// Therefore, it's always correct to return an empty result when
+		// the user requests a filter by prefix.
+		return query.ResultsWithEntries(q, nil), nil
+	}
+	if len(q.Filters) > 0 ||
 		len(q.Orders) > 0 ||
 		q.Limit > 0 ||
-		q.Offset > 0 ||
-		!q.KeysOnly ||
-		q.ReturnExpirations ||
-		q.ReturnsSizes {
+		q.Offset > 0 {
 		// TODO this is overly simplistic, but the only caller is
 		// `ipfs refs local` for now, and this gets us moving.
 		return nil, errors.New("flatfs only supports listing all keys in random order")
@@ -1006,7 +1008,7 @@ func (fs *Datastore) Accuracy() string {
 	return string(fs.storedValue.Accuracy)
 }
 
-func (fs *Datastore) walk(path string, result *query.ResultBuilder) error {
+func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
 	dir, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1042,13 +1044,31 @@ func (fs *Datastore) walk(path string, result *query.ResultBuilder) error {
 			continue
 		}
 
+		var result query.Result
+		result.Key = key.String()
+		if !qrb.Query.KeysOnly {
+			value, err := ioutil.ReadFile(filepath.Join(path, fn))
+			if err != nil {
+				result.Error = err
+			} else {
+				// NOTE: Don't set the value/size on error. We
+				// don't want to return partial values.
+				result.Value = value
+				result.Size = len(value)
+			}
+		} else if qrb.Query.ReturnsSizes {
+			var stat os.FileInfo
+			stat, err := os.Stat(filepath.Join(path, fn))
+			if err != nil {
+				result.Error = err
+			} else {
+				result.Size = int(stat.Size())
+			}
+		}
+
 		select {
-		case result.Output <- query.Result{
-			Entry: query.Entry{
-				Key: key.String(),
-			},
-		}:
-		case <-result.Process.Closing():
+		case qrb.Output <- result:
+		case <-qrb.Process.Closing():
 			return nil
 		}
 	}
