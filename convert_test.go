@@ -2,7 +2,7 @@ package flatfs_test
 
 import (
 	"bytes"
-	"encoding/hex"
+	"encoding/base32"
 	"io/ioutil"
 	"math/rand"
 	"os"
@@ -205,7 +205,7 @@ func populateDatastore(t *testing.T, dir string) ([]datastore.Key, [][]byte) {
 		r.Read(blk)
 		blocks = append(blocks, blk)
 
-		key := "x" + hex.EncodeToString(blk[:8])
+		key := "X" + base32.StdEncoding.EncodeToString(blk[:8])
 		keys = append(keys, datastore.NewKey(key))
 		err := ds.Put(keys[i], blocks[i])
 		if err != nil {

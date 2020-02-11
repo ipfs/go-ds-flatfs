@@ -361,6 +361,10 @@ var putMaxRetries = 6
 // concurrent Put and a Delete operation, we cannot guarantee which one
 // will win.
 func (fs *Datastore) Put(key datastore.Key, value []byte) error {
+	if !keyIsValid(key) {
+		return fmt.Errorf("key not supported by flatfs: '%q'", key)
+	}
+
 	fs.shutdownLock.RLock()
 	defer fs.shutdownLock.RUnlock()
 	if fs.shutdown {
@@ -580,6 +584,11 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 }
 
 func (fs *Datastore) Get(key datastore.Key) (value []byte, err error) {
+	// Can't exist in datastore.
+	if !keyIsValid(key) {
+		return nil, datastore.ErrNotFound
+	}
+
 	_, path := fs.encode(key)
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
@@ -593,6 +602,11 @@ func (fs *Datastore) Get(key datastore.Key) (value []byte, err error) {
 }
 
 func (fs *Datastore) Has(key datastore.Key) (exists bool, err error) {
+	// Can't exist in datastore.
+	if !keyIsValid(key) {
+		return false, nil
+	}
+
 	_, path := fs.encode(key)
 	switch _, err := os.Stat(path); {
 	case err == nil:
@@ -605,6 +619,11 @@ func (fs *Datastore) Has(key datastore.Key) (exists bool, err error) {
 }
 
 func (fs *Datastore) GetSize(key datastore.Key) (size int, err error) {
+	// Can't exist in datastore.
+	if !keyIsValid(key) {
+		return -1, datastore.ErrNotFound
+	}
+
 	_, path := fs.encode(key)
 	switch s, err := os.Stat(path); {
 	case err == nil:
@@ -620,6 +639,11 @@ func (fs *Datastore) GetSize(key datastore.Key) (size int, err error) {
 // the Put() explanation about the handling of concurrent write
 // operations to the same key.
 func (fs *Datastore) Delete(key datastore.Key) error {
+	// Can't exist in datastore.
+	if !keyIsValid(key) {
+		return nil
+	}
+
 	fs.shutdownLock.RLock()
 	defer fs.shutdownLock.RUnlock()
 	if fs.shutdown {
@@ -1113,12 +1137,17 @@ func (fs *Datastore) Batch() (datastore.Batch, error) {
 }
 
 func (bt *flatfsBatch) Put(key datastore.Key, val []byte) error {
+	if !keyIsValid(key) {
+		return fmt.Errorf("key not supported by flatfs: '%q'", key)
+	}
 	bt.puts[key] = val
 	return nil
 }
 
 func (bt *flatfsBatch) Delete(key datastore.Key) error {
-	bt.deletes[key] = struct{}{}
+	if keyIsValid(key) {
+		bt.deletes[key] = struct{}{}
+	} // otherwise, delete is a no-op anyways.
 	return nil
 }
 
