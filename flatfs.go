@@ -660,14 +660,6 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 		// the user requests a filter by prefix.
 		return query.ResultsWithEntries(q, nil), nil
 	}
-	if len(q.Filters) > 0 ||
-		len(q.Orders) > 0 ||
-		q.Limit > 0 ||
-		q.Offset > 0 {
-		// TODO this is overly simplistic, but the only caller is
-		// `ipfs refs local` for now, and this gets us moving.
-		return nil, errors.New("flatfs only supports listing all keys in random order")
-	}
 
 	// Replicates the logic in ResultsWithChan but actually respects calls
 	// to `Close`.
@@ -684,7 +676,18 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 	})
 	go b.Process.CloseAfterChildren() //nolint
 
-	return b.Results(), nil
+	results := b.Results()
+
+	if len(q.Filters) > 0 ||
+		len(q.Orders) > 0 ||
+		q.Limit > 0 ||
+		q.Offset > 0 {
+		nq := q
+		nq.Prefix = "" // already handled
+		results = query.NaiveQueryApply(nq, results)
+	}
+
+	return results, nil
 }
 
 func (fs *Datastore) walkTopLevel(path string, result *query.ResultBuilder) error {
