@@ -653,7 +653,8 @@ func (fs *Datastore) doDelete(key datastore.Key) error {
 }
 
 func (fs *Datastore) Query(q query.Query) (query.Results, error) {
-	if (q.Prefix != "" && q.Prefix != "/") ||
+	prefix := datastore.NewKey(q.Prefix).String()
+	if (prefix != "/") ||
 		len(q.Filters) > 0 ||
 		len(q.Orders) > 0 ||
 		q.Limit > 0 ||
