@@ -683,6 +683,11 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 		// This datastore can't include keys with multiple components.
 		// Therefore, it's always correct to return an empty result when
 		// the user requests a filter by prefix.
+		log.Warnw(
+			"flatfs was queried with a key prefix but flatfs only supports keys at the root",
+			"prefix", q.Prefix,
+			"query", q,
+		)
 		return query.ResultsWithEntries(q, nil), nil
 	}
 
