@@ -95,6 +95,7 @@ var (
 	ErrDatastoreDoesNotExist = errors.New("datastore directory does not exist")
 	ErrShardingFileMissing   = fmt.Errorf("%s file not found in datastore", SHARDING_FN)
 	ErrClosed                = errors.New("datastore closed")
+	ErrInvalidKey            = errors.New("key not supported by flatfs")
 )
 
 func init() {
@@ -362,7 +363,7 @@ var putMaxRetries = 6
 // will win.
 func (fs *Datastore) Put(key datastore.Key, value []byte) error {
 	if !keyIsValid(key) {
-		return fmt.Errorf("key not supported by flatfs: '%q'", key)
+		return fmt.Errorf("when putting '%q': %w", key, ErrInvalidKey)
 	}
 
 	fs.shutdownLock.RLock()
@@ -1138,7 +1139,7 @@ func (fs *Datastore) Batch() (datastore.Batch, error) {
 
 func (bt *flatfsBatch) Put(key datastore.Key, val []byte) error {
 	if !keyIsValid(key) {
-		return fmt.Errorf("key not supported by flatfs: '%q'", key)
+		return fmt.Errorf("when putting '%q': %w", key, ErrInvalidKey)
 	}
 	bt.puts[key] = val
 	return nil
