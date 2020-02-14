@@ -701,18 +701,9 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 	})
 	go b.Process.CloseAfterChildren() //nolint
 
-	results := b.Results()
-
-	if len(q.Filters) > 0 ||
-		len(q.Orders) > 0 ||
-		q.Limit > 0 ||
-		q.Offset > 0 {
-		nq := q
-		nq.Prefix = "" // already handled
-		results = query.NaiveQueryApply(nq, results)
-	}
-
-	return results, nil
+	// We don't apply _any_ of the query logic ourselves so we'll leave it
+	// all up to the naive query engine.
+	return query.NaiveQueryApply(q, b.Results()), nil
 }
 
 func (fs *Datastore) walkTopLevel(path string, result *query.ResultBuilder) error {
