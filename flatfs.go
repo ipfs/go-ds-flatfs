@@ -95,6 +95,7 @@ var (
 	ErrDatastoreDoesNotExist = errors.New("datastore directory does not exist")
 	ErrShardingFileMissing   = fmt.Errorf("%s file not found in datastore", SHARDING_FN)
 	ErrClosed                = errors.New("datastore closed")
+	ErrInvalidKey            = errors.New("key not supported by flatfs")
 )
 
 func init() {
@@ -361,6 +362,10 @@ var putMaxRetries = 6
 // concurrent Put and a Delete operation, we cannot guarantee which one
 // will win.
 func (fs *Datastore) Put(key datastore.Key, value []byte) error {
+	if !keyIsValid(key) {
+		return fmt.Errorf("when putting '%q': %w", key, ErrInvalidKey)
+	}
+
 	fs.shutdownLock.RLock()
 	defer fs.shutdownLock.RUnlock()
 	if fs.shutdown {
@@ -580,6 +585,11 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 }
 
 func (fs *Datastore) Get(key datastore.Key) (value []byte, err error) {
+	// Can't exist in datastore.
+	if !keyIsValid(key) {
+		return nil, datastore.ErrNotFound
+	}
+
 	_, path := fs.encode(key)
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
@@ -593,6 +603,11 @@ func (fs *Datastore) Get(key datastore.Key) (value []byte, err error) {
 }
 
 func (fs *Datastore) Has(key datastore.Key) (exists bool, err error) {
+	// Can't exist in datastore.
+	if !keyIsValid(key) {
+		return false, nil
+	}
+
 	_, path := fs.encode(key)
 	switch _, err := os.Stat(path); {
 	case err == nil:
@@ -605,6 +620,11 @@ func (fs *Datastore) Has(key datastore.Key) (exists bool, err error) {
 }
 
 func (fs *Datastore) GetSize(key datastore.Key) (size int, err error) {
+	// Can't exist in datastore.
+	if !keyIsValid(key) {
+		return -1, datastore.ErrNotFound
+	}
+
 	_, path := fs.encode(key)
 	switch s, err := os.Stat(path); {
 	case err == nil:
@@ -620,6 +640,11 @@ func (fs *Datastore) GetSize(key datastore.Key) (size int, err error) {
 // the Put() explanation about the handling of concurrent write
 // operations to the same key.
 func (fs *Datastore) Delete(key datastore.Key) error {
+	// Can't exist in datastore.
+	if !keyIsValid(key) {
+		return nil
+	}
+
 	fs.shutdownLock.RLock()
 	defer fs.shutdownLock.RUnlock()
 	if fs.shutdown {
@@ -654,17 +679,16 @@ func (fs *Datastore) doDelete(key datastore.Key) error {
 
 func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 	prefix := datastore.NewKey(q.Prefix).String()
-	if (prefix != "/") ||
-		len(q.Filters) > 0 ||
-		len(q.Orders) > 0 ||
-		q.Limit > 0 ||
-		q.Offset > 0 ||
-		!q.KeysOnly ||
-		q.ReturnExpirations ||
-		q.ReturnsSizes {
-		// TODO this is overly simplistic, but the only caller is
-		// `ipfs refs local` for now, and this gets us moving.
-		return nil, errors.New("flatfs only supports listing all keys in random order")
+	if prefix != "/" {
+		// This datastore can't include keys with multiple components.
+		// Therefore, it's always correct to return an empty result when
+		// the user requests a filter by prefix.
+		log.Warnw(
+			"flatfs was queried with a key prefix but flatfs only supports keys at the root",
+			"prefix", q.Prefix,
+			"query", q,
+		)
+		return query.ResultsWithEntries(q, nil), nil
 	}
 
 	// Replicates the logic in ResultsWithChan but actually respects calls
@@ -682,7 +706,9 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 	})
 	go b.Process.CloseAfterChildren() //nolint
 
-	return b.Results(), nil
+	// We don't apply _any_ of the query logic ourselves so we'll leave it
+	// all up to the naive query engine.
+	return query.NaiveQueryApply(q, b.Results()), nil
 }
 
 func (fs *Datastore) walkTopLevel(path string, result *query.ResultBuilder) error {
@@ -893,7 +919,7 @@ func (fs *Datastore) checkpointLoop() {
 			if !more { // shutting down
 				fs.writeDiskUsageFile(du, true)
 				if fs.dirty {
-					log.Errorf("could not store final value of disk usage to file, future estimates may be inaccurate")
+					log.Error("could not store final value of disk usage to file, future estimates may be inaccurate")
 				}
 				return
 			}
@@ -925,7 +951,7 @@ func (fs *Datastore) checkpointLoop() {
 func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 	tmp, err := ioutil.TempFile(fs.path, "du-")
 	if err != nil {
-		log.Warningf("cound not write disk usage: %v", err)
+		log.Warnw("could not write disk usage", "error", err)
 		return
 	}
 
@@ -941,24 +967,24 @@ func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 	toWrite.DiskUsage = du
 	encoder := json.NewEncoder(tmp)
 	if err := encoder.Encode(&toWrite); err != nil {
-		log.Warningf("cound not write disk usage: %v", err)
+		log.Warnw("cound not write disk usage", "error", err)
 		return
 	}
 
 	if doSync {
 		if err := tmp.Sync(); err != nil {
-			log.Warningf("cound not sync %s: %v", DiskUsageFile, err)
+			log.Warnw("cound not sync", "error", err, "file", DiskUsageFile)
 			return
 		}
 	}
 
 	if err := tmp.Close(); err != nil {
-		log.Warningf("cound not write disk usage: %v", err)
+		log.Warnw("cound not write disk usage", "error", err)
 		return
 	}
 
 	if err := os.Rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile)); err != nil {
-		log.Warningf("cound not write disk usage: %v", err)
+		log.Warnw("cound not write disk usage", "error", err)
 		return
 	}
 	removed = true
@@ -1006,7 +1032,7 @@ func (fs *Datastore) Accuracy() string {
 	return string(fs.storedValue.Accuracy)
 }
 
-func (fs *Datastore) walk(path string, result *query.ResultBuilder) error {
+func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
 	dir, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1038,17 +1064,35 @@ func (fs *Datastore) walk(path string, result *query.ResultBuilder) error {
 
 		key, ok := fs.decode(fn)
 		if !ok {
-			log.Warningf("failed to decode flatfs entry: %s", fn)
+			log.Warnw("failed to decode flatfs entry", "file", fn)
 			continue
 		}
 
+		var result query.Result
+		result.Key = key.String()
+		if !qrb.Query.KeysOnly {
+			value, err := ioutil.ReadFile(filepath.Join(path, fn))
+			if err != nil {
+				result.Error = err
+			} else {
+				// NOTE: Don't set the value/size on error. We
+				// don't want to return partial values.
+				result.Value = value
+				result.Size = len(value)
+			}
+		} else if qrb.Query.ReturnsSizes {
+			var stat os.FileInfo
+			stat, err := os.Stat(filepath.Join(path, fn))
+			if err != nil {
+				result.Error = err
+			} else {
+				result.Size = int(stat.Size())
+			}
+		}
+
 		select {
-		case result.Output <- query.Result{
-			Entry: query.Entry{
-				Key: key.String(),
-			},
-		}:
-		case <-result.Process.Closing():
+		case qrb.Output <- result:
+		case <-qrb.Process.Closing():
 			return nil
 		}
 	}
@@ -1090,12 +1134,17 @@ func (fs *Datastore) Batch() (datastore.Batch, error) {
 }
 
 func (bt *flatfsBatch) Put(key datastore.Key, val []byte) error {
+	if !keyIsValid(key) {
+		return fmt.Errorf("when putting '%q': %w", key, ErrInvalidKey)
+	}
 	bt.puts[key] = val
 	return nil
 }
 
 func (bt *flatfsBatch) Delete(key datastore.Key) error {
-	bt.deletes[key] = struct{}{}
+	if keyIsValid(key) {
+		bt.deletes[key] = struct{}{}
+	} // otherwise, delete is a no-op anyways.
 	return nil
 }
 

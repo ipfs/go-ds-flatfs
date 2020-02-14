@@ -13,6 +13,9 @@
 
 `go-ds-flatfs` is used by `go-ipfs` to store raw block contents on disk. It supports several sharding functions (prefix, suffix, next-to-last/*).
 
+It is _not_ a general-purpose datastore and has several important restrictions.
+See the restrictions section for details.
+
 ## Lead Maintainer
 
 [Jakub Sztandera](https://github.com/kubuxu)
@@ -33,12 +36,20 @@
 import "github.com/ipfs/go-ds-flatfs"
 ```
 
-`go-ds-flatfs` uses [`Gx`](https://github.com/whyrusleeping/gx) and [`Gx-go`](https://github.com/whyrusleeping/gx-go) to handle dependendencies. Run `make deps` to download and rewrite the imports to their fixed dependencies.
-
 ## Usage
 
 Check the [GoDoc module documentation](https://godoc.org/github.com/ipfs/go-ds-flatfs) for an overview of this module's
 functionality.
+
+### Restrictions
+
+FlatFS keys are severely restricted. Only keys that match `/[0-9A-Z+-_=]\+` are
+allowed. That is, keys may only contain upper-case alpha-numeric characters,
+'-', '+', '_', and '='. This is because values are written directly to the
+filesystem without encoding.
+
+Importantly, this means namespaced keys (e.g., /FOO/BAR), are _not_ allowed.
+Attempts to write to such keys will result in an error.
 
 ### DiskUsage and Accuracy
 
