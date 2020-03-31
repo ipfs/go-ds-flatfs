@@ -290,7 +290,12 @@ func (fs *Datastore) encode(key datastore.Key) (dir, file string) {
 }
 
 func (fs *Datastore) decode(file string) (key datastore.Key, ok bool) {
-	if filepath.Ext(file) != extension {
+	if !strings.HasSuffix(file, extension) {
+		// We expect random files like "put-". Log when we encounter
+		// others.
+		if !strings.HasPrefix(file, "put-") {
+			log.Warnw("failed to decode flatfs filename", "file", file)
+		}
 		return datastore.Key{}, false
 	}
 	name := file[:len(file)-len(extension)]
@@ -1064,7 +1069,7 @@ func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
 
 		key, ok := fs.decode(fn)
 		if !ok {
-			log.Warnw("failed to decode flatfs entry", "file", fn)
+			// not a block.
 			continue
 		}
 
