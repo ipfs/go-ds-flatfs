@@ -112,7 +112,8 @@ type Datastore struct {
 	// (see https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	diskUsage int64
 
-	path string
+	path     string
+	tempPath string
 
 	shardStr string
 	getDir   ShardFunc
@@ -196,7 +197,6 @@ func (o *opResult) Finish(ok bool) {
 }
 
 func Create(path string, fun *ShardIdV1) error {
-
 	err := os.Mkdir(path, 0755)
 	if err != nil && !os.IsExist(err) {
 		return err
@@ -238,6 +238,17 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 		return nil, err
 	}
 
+	tempPath := filepath.Join(path, ".temp")
+	err = os.RemoveAll(tempPath)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("failed to remove temporary directory: %w", err)
+	}
+
+	err = os.Mkdir(tempPath, 0755)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
+	}
+
 	shardId, err := ReadShardFunc(path)
 	if err != nil {
 		return nil, err
@@ -245,6 +256,7 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 
 	fs := &Datastore{
 		path:         path,
+		tempPath:     tempPath,
 		shardStr:     shardId.String(),
 		getDir:       shardId.Func(),
 		sync:         syncFiles,
@@ -452,7 +464,7 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 		return err
 	}
 
-	tmp, err := ioutil.TempFile(dir, "put-")
+	tmp, err := fs.tempFile()
 	if err != nil {
 		return err
 	}
@@ -528,7 +540,7 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 		}
 		dirsToSync = append(dirsToSync, dir)
 
-		tmp, err := ioutil.TempFile(dir, "put-")
+		tmp, err := fs.tempFile()
 		if err != nil {
 			return err
 		}
@@ -954,7 +966,7 @@ func (fs *Datastore) checkpointLoop() {
 }
 
 func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
-	tmp, err := ioutil.TempFile(fs.path, "du-")
+	tmp, err := fs.tempFile()
 	if err != nil {
 		log.Warnw("could not write disk usage", "error", err)
 		return
@@ -1035,6 +1047,11 @@ func (fs *Datastore) DiskUsage() (uint64, error) {
 // and for informational purposes only
 func (fs *Datastore) Accuracy() string {
 	return string(fs.storedValue.Accuracy)
+}
+
+func (fs *Datastore) tempFile() (*os.File, error) {
+	file, err := ioutil.TempFile(fs.tempPath, "temp-")
+	return file, err
 }
 
 func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {

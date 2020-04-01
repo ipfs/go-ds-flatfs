@@ -187,7 +187,7 @@ func testStorage(p *params, t *testing.T) {
 			return err
 		}
 		switch path {
-		case ".", "..", "SHARDING", flatfs.DiskUsageFile:
+		case ".", "..", "SHARDING", flatfs.DiskUsageFile, ".temp":
 			// ignore
 		case "_README":
 			_, err := ioutil.ReadFile(absPath)
@@ -950,9 +950,8 @@ func TestNoCluster(t *testing.T) {
 	tolerance := math.Floor(idealFilesPerDir * 0.25)
 	count := 0
 	for _, dir := range dirs {
-		if dir.Name() == flatfs.SHARDING_FN ||
-			dir.Name() == flatfs.README_FN ||
-			dir.Name() == flatfs.DiskUsageFile {
+		switch dir.Name() {
+		case flatfs.SHARDING_FN, flatfs.README_FN, flatfs.DiskUsageFile, ".temp":
 			continue
 		}
 		count += 1
