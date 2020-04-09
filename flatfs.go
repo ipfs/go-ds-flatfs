@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
@@ -608,7 +607,7 @@ func (fs *Datastore) Get(key datastore.Key) (value []byte, err error) {
 	}
 
 	_, path := fs.encode(key)
-	data, err := ioutil.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, datastore.ErrNotFound
@@ -1013,7 +1012,7 @@ func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 // readDiskUsageFile is only safe to call in Open()
 func (fs *Datastore) readDiskUsageFile() int64 {
 	fpath := filepath.Join(fs.path, DiskUsageFile)
-	duB, err := ioutil.ReadFile(fpath)
+	duB, err := readFile(fpath)
 	if err != nil {
 		return 0
 	}
@@ -1050,7 +1049,7 @@ func (fs *Datastore) Accuracy() string {
 }
 
 func (fs *Datastore) tempFile() (*os.File, error) {
-	file, err := ioutil.TempFile(fs.tempPath, "temp-")
+	file, err := tempFile(fs.tempPath, "temp-")
 	return file, err
 }
 
@@ -1093,7 +1092,7 @@ func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
 		var result query.Result
 		result.Key = key.String()
 		if !qrb.Query.KeysOnly {
-			value, err := ioutil.ReadFile(filepath.Join(path, fn))
+			value, err := readFile(filepath.Join(path, fn))
 			if err != nil {
 				result.Error = err
 			} else {
