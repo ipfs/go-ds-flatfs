@@ -240,12 +240,12 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 	tempPath := filepath.Join(path, ".temp")
 	err = os.RemoveAll(tempPath)
 	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to remove temporary directory: %w", err)
+		return nil, fmt.Errorf("failed to remove temporary directory: %v", err)
 	}
 
 	err = os.Mkdir(tempPath, 0755)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
+		return nil, fmt.Errorf("failed to create temporary directory: %v", err)
 	}
 
 	shardId, err := ReadShardFunc(path)
@@ -379,7 +379,7 @@ var putMaxRetries = 6
 // will win.
 func (fs *Datastore) Put(key datastore.Key, value []byte) error {
 	if !keyIsValid(key) {
-		return fmt.Errorf("when putting '%q': %w", key, ErrInvalidKey)
+		return fmt.Errorf("when putting '%q': %v", key, ErrInvalidKey)
 	}
 
 	fs.shutdownLock.RLock()
@@ -1156,7 +1156,7 @@ func (fs *Datastore) Batch() (datastore.Batch, error) {
 
 func (bt *flatfsBatch) Put(key datastore.Key, val []byte) error {
 	if !keyIsValid(key) {
-		return fmt.Errorf("when putting '%q': %w", key, ErrInvalidKey)
+		return fmt.Errorf("when putting '%q': %v", key, ErrInvalidKey)
 	}
 	bt.puts[key] = val
 	return nil
