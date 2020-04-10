@@ -7,11 +7,12 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 	"time"
 
 	"github.com/ipfs/go-datastore"
-	"github.com/ipfs/go-ds-flatfs"
+	flatfs "github.com/ipfs/go-ds-flatfs"
 )
 
 func TestMove(t *testing.T) {
@@ -57,6 +58,9 @@ func TestMove(t *testing.T) {
 }
 
 func TestMoveRestart(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip()
+	}
 	tempdir, cleanup := tempdir(t)
 	defer cleanup()
 

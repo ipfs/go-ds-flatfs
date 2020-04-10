@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
@@ -241,12 +240,12 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 	tempPath := filepath.Join(path, ".temp")
 	err = os.RemoveAll(tempPath)
 	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("failed to remove temporary directory: %w", err)
+		return nil, fmt.Errorf("failed to remove temporary directory: %v", err)
 	}
 
 	err = os.Mkdir(tempPath, 0755)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary directory: %w", err)
+		return nil, fmt.Errorf("failed to create temporary directory: %v", err)
 	}
 
 	shardId, err := ReadShardFunc(path)
@@ -380,7 +379,7 @@ var putMaxRetries = 6
 // will win.
 func (fs *Datastore) Put(key datastore.Key, value []byte) error {
 	if !keyIsValid(key) {
-		return fmt.Errorf("when putting '%q': %w", key, ErrInvalidKey)
+		return fmt.Errorf("when putting '%q': %v", key, ErrInvalidKey)
 	}
 
 	fs.shutdownLock.RLock()
@@ -608,7 +607,7 @@ func (fs *Datastore) Get(key datastore.Key) (value []byte, err error) {
 	}
 
 	_, path := fs.encode(key)
-	data, err := ioutil.ReadFile(path)
+	data, err := readFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, datastore.ErrNotFound
@@ -734,11 +733,15 @@ func (fs *Datastore) walkTopLevel(path string, result *query.ResultBuilder) erro
 		return err
 	}
 	defer dir.Close()
-	names, err := dir.Readdirnames(-1)
+	entries, err := dir.Readdir(-1)
 	if err != nil {
 		return err
 	}
-	for _, dir := range names {
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := entry.Name()
 		if len(dir) == 0 || dir[0] == '.' {
 			continue
 		}
@@ -1019,7 +1022,7 @@ func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 // readDiskUsageFile is only safe to call in Open()
 func (fs *Datastore) readDiskUsageFile() int64 {
 	fpath := filepath.Join(fs.path, DiskUsageFile)
-	duB, err := ioutil.ReadFile(fpath)
+	duB, err := readFile(fpath)
 	if err != nil {
 		return 0
 	}
@@ -1056,10 +1059,11 @@ func (fs *Datastore) Accuracy() string {
 }
 
 func (fs *Datastore) tempFile() (*os.File, error) {
-	file, err := ioutil.TempFile(fs.tempPath, "temp-")
+	file, err := tempFile(fs.tempPath, "temp-")
 	return file, err
 }
 
+// only call this on directories.
 func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
 	dir, err := os.Open(path)
 	if err != nil {
@@ -1070,15 +1074,6 @@ func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
 		return err
 	}
 	defer dir.Close()
-
-	// ignore non-directories
-	fileInfo, err := dir.Stat()
-	if err != nil {
-		return err
-	}
-	if !fileInfo.IsDir() {
-		return nil
-	}
 
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
@@ -1099,7 +1094,7 @@ func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
 		var result query.Result
 		result.Key = key.String()
 		if !qrb.Query.KeysOnly {
-			value, err := ioutil.ReadFile(filepath.Join(path, fn))
+			value, err := readFile(filepath.Join(path, fn))
 			if err != nil {
 				result.Error = err
 			} else {
@@ -1163,7 +1158,7 @@ func (fs *Datastore) Batch() (datastore.Batch, error) {
 
 func (bt *flatfsBatch) Put(key datastore.Key, val []byte) error {
 	if !keyIsValid(key) {
-		return fmt.Errorf("when putting '%q': %w", key, ErrInvalidKey)
+		return fmt.Errorf("when putting '%q': %v", key, ErrInvalidKey)
 	}
 	bt.puts[key] = val
 	return nil
