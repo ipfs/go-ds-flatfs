@@ -586,8 +586,10 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 
 		// Fallback retry for temporary error.
 		if err != nil && isTooManyFDError(err) {
+			if err = closer(); err != nil {
+				return err
+			}
 			for i := 0; i < 6; i++ {
-				closer()
 				time.Sleep(time.Duration(i+1) * RetryDelay)
 
 				tmp, err = fs.tempFile()
@@ -614,7 +616,10 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 
 	// Now we sync everything
 	// sync and close files
-	closer()
+	err := closer()
+	if err != nil {
+		return err
+	}
 
 	// move files to their proper places
 	for fi, op := range files {
