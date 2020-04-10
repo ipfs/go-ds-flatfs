@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/ipfs/go-datastore"
@@ -48,6 +49,9 @@ var (
 	// If this period did not suffice to read the size of the datastore,
 	// the remaining sizes will be stimated.
 	DiskUsageCalcTimeout = 5 * time.Minute
+	// RetryDelay is a timeout for a backoff on retrying operations
+	// that fail due to transient errors like too many file descriptors open.
+	RetryDelay = time.Millisecond * 200
 )
 
 const (
@@ -432,6 +436,15 @@ func (fs *Datastore) doOp(oper *op) error {
 	}
 }
 
+func isTooManyFDError(err error) bool {
+	perr, ok := err.(*os.PathError)
+	if ok && perr.Err == syscall.EMFILE {
+		return true
+	}
+
+	return false
+}
+
 // doWrite optimizes out write operations (put/delete) to the same
 // key by queueing them and succeeding all queued
 // operations if one of them does. In such case,
@@ -448,6 +461,18 @@ func (fs *Datastore) doWriteOp(oper *op) error {
 
 	// Do the operation
 	err := fs.doOp(oper)
+
+	// Fallback retry for temporary error.
+	if err != nil && isTooManyFDError(err) {
+		for i := 0; i < 6; i++ {
+			time.Sleep(time.Duration(i+1) * RetryDelay)
+
+			err = fs.doOp(oper)
+			if err == nil || !isTooManyFDError(err) {
+				break
+			}
+		}
+	}
 
 	// Finish it. If no error, it will signal other operations
 	// waiting on this result to succeed. Otherwise, they will
@@ -540,6 +565,18 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 		dirsToSync = append(dirsToSync, dir)
 
 		tmp, err := fs.tempFile()
+
+		// Fallback retry for temporary error.
+		if err != nil && isTooManyFDError(err) {
+			for i := 0; i < 6; i++ {
+				time.Sleep(time.Duration(i+1) * RetryDelay)
+
+				tmp, err = fs.tempFile()
+				if err == nil || !isTooManyFDError(err) {
+					break
+				}
+			}
+		}
 		if err != nil {
 			return err
 		}
@@ -601,6 +638,24 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 }
 
 func (fs *Datastore) Get(key datastore.Key) (value []byte, err error) {
+	value, err = fs.get(key)
+
+	// Fallback retry for temporary error.
+	if err != nil && isTooManyFDError(err) {
+		for i := 0; i < 6; i++ {
+			time.Sleep(time.Duration(i+1) * RetryDelay)
+
+			value, err = fs.get(key)
+			if err == nil || !isTooManyFDError(err) {
+				break
+			}
+		}
+	}
+
+	return
+}
+
+func (fs *Datastore) get(key datastore.Key) (value []byte, err error) {
 	// Can't exist in datastore.
 	if !keyIsValid(key) {
 		return nil, datastore.ErrNotFound
