@@ -460,18 +460,14 @@ func (fs *Datastore) doWriteOp(oper *op) error {
 	}
 
 	// Do the operation
-	err := fs.doOp(oper)
+	var err error
+	for i := 0; i < 6; i++ {
+		err = fs.doOp(oper)
 
-	// Fallback retry for temporary error.
-	if err != nil && isTooManyFDError(err) {
-		for i := 0; i < 6; i++ {
-			time.Sleep(time.Duration(i+1) * RetryDelay)
-
-			err = fs.doOp(oper)
-			if err == nil || !isTooManyFDError(err) {
-				break
-			}
+		if err == nil || !isTooManyFDError(err) {
+			break
 		}
+		time.Sleep(time.Duration(i+1) * RetryDelay)
 	}
 
 	// Finish it. If no error, it will signal other operations
@@ -557,6 +553,28 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 		}
 	}()
 
+	closer := func() error {
+		for fi := range files {
+			if ops[fi] != 0 {
+				continue
+			}
+
+			if fs.sync {
+				if err := syncFile(fi); err != nil {
+					return err
+				}
+			}
+
+			if err := fi.Close(); err != nil {
+				return err
+			}
+
+			// signify closed
+			ops[fi] = 1
+		}
+		return nil
+	}
+
 	for key, value := range data {
 		dir, path := fs.encode(key)
 		if err := fs.makeDirNoSync(dir); err != nil {
@@ -569,6 +587,7 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 		// Fallback retry for temporary error.
 		if err != nil && isTooManyFDError(err) {
 			for i := 0; i < 6; i++ {
+				closer()
 				time.Sleep(time.Duration(i+1) * RetryDelay)
 
 				tmp, err = fs.tempFile()
@@ -595,20 +614,7 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 
 	// Now we sync everything
 	// sync and close files
-	for fi := range files {
-		if fs.sync {
-			if err := syncFile(fi); err != nil {
-				return err
-			}
-		}
-
-		if err := fi.Close(); err != nil {
-			return err
-		}
-
-		// signify closed
-		ops[fi] = 1
-	}
+	closer()
 
 	// move files to their proper places
 	for fi, op := range files {
