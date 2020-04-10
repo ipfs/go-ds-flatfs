@@ -95,7 +95,7 @@ func Move(oldPath string, newPath string, out io.Writer) error {
 	}
 
 	// now walk the old top-level directory
-	dir, err := os.Open(oldDS.path)
+	dir, err := open(oldDS.path)
 	if err != nil {
 		return err
 	}
@@ -114,7 +114,7 @@ func Move(oldPath string, newPath string, out io.Writer) error {
 			return err
 		}
 		if inf.IsDir() {
-			indir, err := os.Open(oldPath)
+			indir, err := open(oldPath)
 			if err != nil {
 				return err
 			}
