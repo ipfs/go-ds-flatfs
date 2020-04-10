@@ -394,7 +394,7 @@ func (fs *Datastore) Put(key datastore.Key, value []byte) error {
 
 	var err error
 	for i := 1; i <= putMaxRetries; i++ {
-		err = fs.doWriteOp(&op{
+		_, err = fs.doWriteOp(&op{
 			typ: opPut,
 			key: key,
 			v:   value,
@@ -451,16 +451,18 @@ func isTooManyFDError(err error) bool {
 // we assume that the first succeeding operation
 // on that key was the last one to happen after
 // all successful others.
-func (fs *Datastore) doWriteOp(oper *op) error {
+//
+// done is true if we actually performed the operation, false if we skipped or
+// failed.
+func (fs *Datastore) doWriteOp(oper *op) (done bool, err error) {
 	keyStr := oper.key.String()
 
 	opRes := fs.opMap.Begin(keyStr)
 	if opRes == nil { // nothing to do, a concurrent op succeeded
-		return nil
+		return false, nil
 	}
 
 	// Do the operation
-	var err error
 	for i := 0; i < 6; i++ {
 		err = fs.doOp(oper)
 
@@ -474,7 +476,7 @@ func (fs *Datastore) doWriteOp(oper *op) error {
 	// waiting on this result to succeed. Otherwise, they will
 	// retry.
 	opRes.Finish(err == nil)
-	return err
+	return err == nil, err
 }
 
 func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
@@ -623,12 +625,13 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 
 	// move files to their proper places
 	for fi, op := range files {
-		err := fs.doWriteOp(op)
+		done, err := fs.doWriteOp(op)
 		if err != nil {
 			return err
+		} else if done {
+			// signify removed
+			ops[fi] = 2
 		}
-		// signify removed
-		ops[fi] = 2
 	}
 
 	// now sync the dirs for those files
@@ -733,11 +736,12 @@ func (fs *Datastore) Delete(key datastore.Key) error {
 		return ErrClosed
 	}
 
-	return fs.doWriteOp(&op{
+	_, err := fs.doWriteOp(&op{
 		typ: opDelete,
 		key: key,
 		v:   nil,
 	})
+	return err
 }
 
 // This function always runs within an opLock for the given
