@@ -1,5 +1,13 @@
 // +build windows
 
+// Copyright 2010 The Go Authors. All rights reserved.
+// Use of this source code is governed by a BSD-style
+// license that can be found in the LICENSE file.
+
+// Note: This file is a variant of a subset of the golang standard library
+// src/io/ioutil/tempfile.go
+// with calls to os.Open replaced with the goissue34681.Open variant.
+
 package flatfs
 
 import (
