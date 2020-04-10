@@ -76,11 +76,13 @@ func Move(oldPath string, newPath string, out io.Writer) error {
 			break
 		}
 		if e.Error != nil {
+			res.Close()
 			return e.Error
 		}
 
 		err := moveKey(oldDS, newDS, datastore.RawKey(e.Key))
 		if err != nil {
+			res.Close()
 			return err
 		}
 
@@ -89,6 +91,7 @@ func Move(oldPath string, newPath string, out io.Writer) error {
 			fmt.Fprintf(out, "\r%d keys so far", count)
 		}
 	}
+	res.Close()
 
 	if out != nil {
 		fmt.Fprintf(out, "\nCleaning Up...\n")
