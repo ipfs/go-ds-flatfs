@@ -973,11 +973,16 @@ func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 	}
 
 	removed := false
+	closed := false
 	defer func() {
+		if !closed {
+			_ = tmp.Close()
+		}
 		if !removed {
 			// silence errcheck
 			_ = os.Remove(tmp.Name())
 		}
+
 	}()
 
 	toWrite := fs.storedValue
@@ -999,6 +1004,7 @@ func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 		log.Warnw("cound not write disk usage", "error", err)
 		return
 	}
+	closed = true
 
 	if err := os.Rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile)); err != nil {
 		log.Warnw("cound not write disk usage", "error", err)
