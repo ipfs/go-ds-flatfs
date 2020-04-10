@@ -75,7 +75,7 @@ func tempFile(dir, pattern string) (f *os.File, err error) {
 	return
 }
 
-func readFile(filename string) ([]byte, error) {
+func readFileOnce(filename string) ([]byte, error) {
 	f, err := goissue34681.Open(filename)
 	if err != nil {
 		return nil, err

@@ -3,6 +3,7 @@ package flatfs
 import (
 	"io"
 	"os"
+	"time"
 )
 
 // From: http://stackoverflow.com/questions/30697324/how-to-check-if-directory-on-path-is-empty
@@ -18,4 +19,16 @@ func DirIsEmpty(name string) (bool, error) {
 		return true, nil
 	}
 	return false, err // Either not empty or error, suits both cases
+}
+
+func readFile(filename string) (data []byte, err error) {
+	// Fallback retry for temporary error.
+	for i := 0; i < 6; i++ {
+		data, err = readFileOnce(filename)
+		if err == nil || !isTooManyFDError(err) {
+			break
+		}
+		time.Sleep(time.Duration(i+1) * RetryDelay)
+	}
+	return data, err
 }

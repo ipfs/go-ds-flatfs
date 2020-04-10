@@ -652,24 +652,6 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 }
 
 func (fs *Datastore) Get(key datastore.Key) (value []byte, err error) {
-	value, err = fs.get(key)
-
-	// Fallback retry for temporary error.
-	if err != nil && isTooManyFDError(err) {
-		for i := 0; i < 6; i++ {
-			time.Sleep(time.Duration(i+1) * RetryDelay)
-
-			value, err = fs.get(key)
-			if err == nil || !isTooManyFDError(err) {
-				break
-			}
-		}
-	}
-
-	return
-}
-
-func (fs *Datastore) get(key datastore.Key) (value []byte, err error) {
 	// Can't exist in datastore.
 	if !keyIsValid(key) {
 		return nil, datastore.ErrNotFound
