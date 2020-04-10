@@ -728,16 +728,20 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 }
 
 func (fs *Datastore) walkTopLevel(path string, result *query.ResultBuilder) error {
-	dir, err := open(path)
+	dir, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer dir.Close()
-	names, err := dir.Readdirnames(-1)
+	entries, err := dir.Readdir(-1)
 	if err != nil {
 		return err
 	}
-	for _, dir := range names {
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		dir := entry.Name()
 		if len(dir) == 0 || dir[0] == '.' {
 			continue
 		}
@@ -1053,8 +1057,9 @@ func (fs *Datastore) tempFile() (*os.File, error) {
 	return file, err
 }
 
+// only call this on directories.
 func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
-	dir, err := open(path)
+	dir, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// not an error if the file disappeared
@@ -1063,15 +1068,6 @@ func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
 		return err
 	}
 	defer dir.Close()
-
-	// ignore non-directories
-	fileInfo, err := dir.Stat()
-	if err != nil {
-		return err
-	}
-	if !fileInfo.IsDir() {
-		return nil
-	}
 
 	names, err := dir.Readdirnames(-1)
 	if err != nil {
