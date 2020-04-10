@@ -5,6 +5,7 @@ require (
 	github.com/ipfs/go-datastore v0.4.4
 	github.com/ipfs/go-log v1.0.3
 	github.com/jbenet/goprocess v0.1.4
+	golang.org/x/sys v0.0.0-20200409092240-59c9f1ba88fa // indirect
 )
 
 go 1.13

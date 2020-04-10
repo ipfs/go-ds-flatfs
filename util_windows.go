@@ -13,6 +13,7 @@ import (
 	"time"
 
 	goissue34681 "github.com/alexbrainman/goissue34681"
+	"golang.org/x/sys/windows"
 )
 
 var tmpRand uint32
@@ -92,6 +93,18 @@ func readFile(filename string) ([]byte, error) {
 	return ioutil.ReadAll(f)
 }
 
+// https://docs.microsoft.com/en-us/windows/win32/fileio/file-attribute-constants
+// aka FILE_ATTRIBUTE_DIRECTORY
+const is_dir_bit = 0x10
+
 func open(name string) (*os.File, error) {
-	return goissue34681.Open(name)
+	namep, err := windows.UTF16PtrFromString(name)
+	if err != nil {
+		return nil, err
+	}
+	if attrs, err := windows.GetFileAttributes(namep); err == nil && (attrs&is_dir_bit) != 0 {
+		return os.Open(name)
+	} else {
+		return goissue34681.Open(name)
+	}
 }
