@@ -14,7 +14,3 @@ func tempFile(dir, pattern string) (*os.File, error) {
 func readFile(filename string) ([]byte, error) {
 	return ioutil.ReadFile(filename)
 }
-
-func open(name string) (*os.File, error) {
-	return os.Open(name)
-}
