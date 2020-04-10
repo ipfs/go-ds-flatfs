@@ -4,6 +4,7 @@
 package flatfs
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -365,6 +366,29 @@ func (fs *Datastore) renameAndUpdateDiskUsage(tmpPath, path string) error {
 	// it will either a) Re-add the size of an existing file, which
 	// was sustracted before b) Add 0 if there is no existing file.
 	err = os.Rename(tmpPath, path)
+
+	// We failed to rename. In many cases, we're dealing content addressed
+	// data (blocks) so, if there's some weird filesystem error where we
+	// failed a rename (e.g., some other windows process is reading the
+	// file...), just check to see if we _would_ have done anything. If not,
+	// walk away.
+	//
+	// Is this slow? Yes. But it's not common so... whatever. Unfortunately,
+	// it _is_ common enough for windows users to cause problems if we
+	// _don't_ have this check.
+	if err != nil && fi != nil {
+		if dstData, err := readFile(tmpPath); err != nil {
+			// failed
+		} else if srcData, err := readFile(path); err != nil {
+			// failed
+		} else if bytes.Equal(dstData, srcData) {
+			// add back the disk usage
+			atomic.AddInt64(&fs.diskUsage, int64(len(dstData)))
+			// checkpoint
+			fs.checkpointDiskUsage()
+			return nil
+		}
+	}
 	fs.updateDiskUsage(path, true)
 	return err
 }
