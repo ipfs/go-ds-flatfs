@@ -91,3 +91,7 @@ func readFile(filename string) ([]byte, error) {
 
 	return ioutil.ReadAll(f)
 }
+
+func open(name string) (*os.File, error) {
+	return goissue34681.Open(name)
+}

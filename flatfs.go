@@ -728,7 +728,7 @@ func (fs *Datastore) Query(q query.Query) (query.Results, error) {
 }
 
 func (fs *Datastore) walkTopLevel(path string, result *query.ResultBuilder) error {
-	dir, err := os.Open(path)
+	dir, err := open(path)
 	if err != nil {
 		return err
 	}
@@ -1054,7 +1054,7 @@ func (fs *Datastore) tempFile() (*os.File, error) {
 }
 
 func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
-	dir, err := os.Open(path)
+	dir, err := open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
 			// not an error if the file disappeared
