@@ -111,7 +111,7 @@ func ParseShardFunc(str string) (*ShardIdV1, error) {
 }
 
 func ReadShardFunc(dir string) (*ShardIdV1, error) {
-	buf, err := ioutil.ReadFile(filepath.Join(dir, SHARDING_FN))
+	buf, err := readFile(filepath.Join(dir, SHARDING_FN))
 	if os.IsNotExist(err) {
 		return nil, ErrShardingFileMissing
 	} else if err != nil {
