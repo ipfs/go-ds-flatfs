@@ -11,6 +11,6 @@ func tempFile(dir, pattern string) (*os.File, error) {
 	return ioutil.TempFile(dir, pattern)
 }
 
-func readFile(filename string) ([]byte, error) {
+func readFileOnce(filename string) ([]byte, error) {
 	return ioutil.ReadFile(filename)
 }
