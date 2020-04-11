@@ -537,42 +537,43 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 		return ErrClosed
 	}
 
-	var dirsToSync []string
+	type putManyOp struct {
+		key     datastore.Key
+		file    *os.File
+		dstPath string
+		srcPath string
+	}
 
-	files := make(map[*os.File]*op, len(data))
-	ops := make(map[*os.File]int, len(data))
+	var (
+		dirsToSync = make(map[string]struct{}, len(data))
+		files      = make([]putManyOp, 0, len(data))
+		closed     int
+		removed    int
+	)
 
 	defer func() {
-		for fi := range files {
-			val := ops[fi]
-			switch val {
-			case 0:
-				_ = fi.Close()
-				fallthrough
-			case 1:
-				_ = os.Remove(fi.Name())
-			}
+		for closed < len(files) {
+			files[closed].file.Close()
+			closed++
+		}
+		for removed < len(files) {
+			_ = os.Remove(files[removed].srcPath)
+			removed++
 		}
 	}()
 
 	closer := func() error {
-		for fi := range files {
-			if ops[fi] != 0 {
-				continue
-			}
-
+		for closed < len(files) {
+			fi := files[closed].file
 			if fs.sync {
 				if err := syncFile(fi); err != nil {
 					return err
 				}
 			}
-
 			if err := fi.Close(); err != nil {
 				return err
 			}
-
-			// signify closed
-			ops[fi] = 1
+			closed++
 		}
 		return nil
 	}
@@ -582,7 +583,7 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 		if err := fs.makeDirNoSync(dir); err != nil {
 			return err
 		}
-		dirsToSync = append(dirsToSync, dir)
+		dirsToSync[dir] = struct{}{}
 
 		tmp, err := fs.tempFile()
 
@@ -604,15 +605,16 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 			return err
 		}
 
+		// Do this _first_ so we close it if writing fails.
+		files = append(files, putManyOp{
+			key:     key,
+			file:    tmp,
+			dstPath: path,
+			srcPath: tmp.Name(),
+		})
+
 		if _, err := tmp.Write(value); err != nil {
 			return err
-		}
-
-		files[tmp] = &op{
-			typ:  opRename,
-			path: path,
-			tmp:  tmp.Name(),
-			key:  key,
 		}
 	}
 
@@ -624,19 +626,24 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 	}
 
 	// move files to their proper places
-	for fi, op := range files {
-		done, err := fs.doWriteOp(op)
+	for _, pop := range files {
+		done, err := fs.doWriteOp(&op{
+			typ:  opRename,
+			key:  pop.key,
+			tmp:  pop.srcPath,
+			path: pop.dstPath,
+		})
 		if err != nil {
 			return err
-		} else if done {
-			// signify removed
-			ops[fi] = 2
+		} else if !done {
+			_ = os.Remove(pop.file.Name())
 		}
+		removed++
 	}
 
 	// now sync the dirs for those files
 	if fs.sync {
-		for _, dir := range dirsToSync {
+		for dir := range dirsToSync {
 			if err := syncDir(dir); err != nil {
 				return err
 			}
