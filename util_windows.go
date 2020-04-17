@@ -51,7 +51,7 @@ func prefixAndSuffix(pattern string) (prefix, suffix string) {
 	return
 }
 
-func tempFile(dir, pattern string) (f *os.File, err error) {
+func tempFileOnce(dir, pattern string) (f *os.File, err error) {
 	if dir == "" {
 		dir = os.TempDir()
 	}

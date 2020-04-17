@@ -368,7 +368,17 @@ func (fs *Datastore) renameAndUpdateDiskUsage(tmpPath, path string) error {
 	// Rename and add new file's diskUsage. If the rename fails,
 	// it will either a) Re-add the size of an existing file, which
 	// was sustracted before b) Add 0 if there is no existing file.
-	err = os.Rename(tmpPath, path)
+	for i := 0; i < RetryAttempts; i++ {
+		err = os.Rename(tmpPath, path)
+		// if there's no error, or the source file doesn't exist, abort.
+		if err == nil || os.IsNotExist(err) {
+			break
+		}
+		// Otherwise, this could be a transient error due to some other
+		// process holding open one of the files. Wait a bit and then
+		// retry.
+		time.Sleep(time.Duration(i+1) * RetryDelay)
+	}
 	fs.updateDiskUsage(path, true)
 	return err
 }
