@@ -726,16 +726,22 @@ func (fs *Datastore) doDelete(key datastore.Key) error {
 
 	fSize := fileSize(path)
 
-	switch err := os.Remove(path); {
-	case err == nil:
+	var err error
+	for i := 0; i < RetryAttempts; i++ {
+		err = os.Remove(path)
+		if err == nil {
+			break
+		} else if os.IsNotExist(err) {
+			return nil
+		}
+	}
+
+	if err == nil {
 		atomic.AddInt64(&fs.diskUsage, -fSize)
 		fs.checkpointDiskUsage()
-		return nil
-	case os.IsNotExist(err):
-		return nil
-	default:
-		return err
 	}
+
+	return err
 }
 
 func (fs *Datastore) Query(q query.Query) (query.Results, error) {
