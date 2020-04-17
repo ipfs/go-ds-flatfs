@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-func tempFile(dir, pattern string) (*os.File, error) {
+func tempFileOnce(dir, pattern string) (*os.File, error) {
 	return ioutil.TempFile(dir, pattern)
 }
 

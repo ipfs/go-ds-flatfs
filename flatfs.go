@@ -52,6 +52,10 @@ var (
 	// RetryDelay is a timeout for a backoff on retrying operations
 	// that fail due to transient errors like too many file descriptors open.
 	RetryDelay = time.Millisecond * 200
+
+	// RetryAttempts is the maximum number of retries that will be attempted
+	// before giving up.
+	RetryAttempts = 6
 )
 
 const (
@@ -369,8 +373,6 @@ func (fs *Datastore) renameAndUpdateDiskUsage(tmpPath, path string) error {
 	return err
 }
 
-var putMaxRetries = 6
-
 // Put stores a key/value in the datastore.
 //
 // Note, that we do not guarantee order of write operations (Put or Delete)
@@ -392,24 +394,11 @@ func (fs *Datastore) Put(key datastore.Key, value []byte) error {
 		return ErrClosed
 	}
 
-	var err error
-	for i := 1; i <= putMaxRetries; i++ {
-		_, err = fs.doWriteOp(&op{
-			typ: opPut,
-			key: key,
-			v:   value,
-		})
-		if err == nil {
-			break
-		}
-
-		if !strings.Contains(err.Error(), "too many open files") {
-			break
-		}
-
-		log.Errorf("too many open files, retrying in %dms", 100*i)
-		time.Sleep(time.Millisecond * 100 * time.Duration(i))
-	}
+	_, err := fs.doWriteOp(&op{
+		typ: opPut,
+		key: key,
+		v:   value,
+	})
 	return err
 }
 
@@ -462,15 +451,7 @@ func (fs *Datastore) doWriteOp(oper *op) (done bool, err error) {
 		return false, nil
 	}
 
-	// Do the operation
-	for i := 0; i < 6; i++ {
-		err = fs.doOp(oper)
-
-		if err == nil || !isTooManyFDError(err) {
-			break
-		}
-		time.Sleep(time.Duration(i+1) * RetryDelay)
-	}
+	err = fs.doOp(oper)
 
 	// Finish it. If no error, it will signal other operations
 	// waiting on this result to succeed. Otherwise, they will
@@ -585,22 +566,17 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 		}
 		dirsToSync[dir] = struct{}{}
 
-		tmp, err := fs.tempFile()
+		tmp, err := fs.tempFileOnce()
 
-		// Fallback retry for temporary error.
-		if err != nil && isTooManyFDError(err) {
+		// If we have too many files open, try closing some, then try
+		// again repeatedly.
+		if isTooManyFDError(err) {
 			if err = closer(); err != nil {
 				return err
 			}
-			for i := 0; i < 6; i++ {
-				time.Sleep(time.Duration(i+1) * RetryDelay)
-
-				tmp, err = fs.tempFile()
-				if err == nil || !isTooManyFDError(err) {
-					break
-				}
-			}
+			tmp, err = fs.tempFile()
 		}
+
 		if err != nil {
 			return err
 		}
@@ -1119,6 +1095,11 @@ func (fs *Datastore) Accuracy() string {
 
 func (fs *Datastore) tempFile() (*os.File, error) {
 	file, err := tempFile(fs.tempPath, "temp-")
+	return file, err
+}
+
+func (fs *Datastore) tempFileOnce() (*os.File, error) {
+	file, err := tempFileOnce(fs.tempPath, "temp-")
 	return file, err
 }
 
