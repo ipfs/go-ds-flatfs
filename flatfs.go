@@ -1109,8 +1109,7 @@ func (fs *Datastore) tempFile() (*os.File, error) {
 }
 
 func (fs *Datastore) tempFileOnce() (*os.File, error) {
-	file, err := tempFileOnce(fs.tempPath, "temp-")
-	return file, err
+	return tempFileOnce(fs.tempPath, "temp-")
 }
 
 // only call this on directories.
