@@ -23,7 +23,7 @@ func DirIsEmpty(name string) (bool, error) {
 
 func readFile(filename string) (data []byte, err error) {
 	// Fallback retry for temporary error.
-	for i := 0; i < 6; i++ {
+	for i := 0; i < RetryAttempts; i++ {
 		data, err = readFileOnce(filename)
 		if err == nil || !isTooManyFDError(err) {
 			break
@@ -31,4 +31,15 @@ func readFile(filename string) (data []byte, err error) {
 		time.Sleep(time.Duration(i+1) * RetryDelay)
 	}
 	return data, err
+}
+
+func tempFile(dir, pattern string) (fi *os.File, err error) {
+	for i := 0; i < RetryAttempts; i++ {
+		fi, err = tempFileOnce(dir, pattern)
+		if err == nil || !isTooManyFDError(err) {
+			break
+		}
+		time.Sleep(time.Duration(i+1) * RetryDelay)
+	}
+	return fi, err
 }
