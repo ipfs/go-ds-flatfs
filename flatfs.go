@@ -466,7 +466,7 @@ func (fs *Datastore) doWriteOp(oper *op) (done bool, err error) {
 	for i := 0; i < 6; i++ {
 		err = fs.doOp(oper)
 
-		if err == nil || !isTooManyFDError(err) {
+		if err == nil || !isTooManyFDError(err) || oper.typ != opRename {
 			break
 		}
 		time.Sleep(time.Duration(i+1) * RetryDelay)
