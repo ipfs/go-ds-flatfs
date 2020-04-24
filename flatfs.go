@@ -297,6 +297,11 @@ func CreateOrOpen(path string, fun *ShardIdV1, sync bool) (*Datastore, error) {
 	return Open(path, sync)
 }
 
+// NewDatastore is a common interface to go-datastore for opening with default options.
+func NewDatastore(path string, options *interface{}) (*Datastore, error) {
+	return CreateOrOpen(path, IPFS_DEF_SHARD, false)
+}
+
 func (fs *Datastore) ShardStr() string {
 	return fs.shardStr
 }
