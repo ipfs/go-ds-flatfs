@@ -369,7 +369,7 @@ func (fs *Datastore) renameAndUpdateDiskUsage(tmpPath, path string) error {
 	// it will either a) Re-add the size of an existing file, which
 	// was sustracted before b) Add 0 if there is no existing file.
 	for i := 0; i < RetryAttempts; i++ {
-		err = os.Rename(tmpPath, path)
+		err = rename(tmpPath, path)
 		// if there's no error, or the source file doesn't exist, abort.
 		if err == nil || os.IsNotExist(err) {
 			break
@@ -1060,7 +1060,7 @@ func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 	}
 	closed = true
 
-	if err := os.Rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile)); err != nil {
+	if err := rename(tmp.Name(), filepath.Join(fs.path, DiskUsageFile)); err != nil {
 		log.Warnw("cound not write disk usage", "error", err)
 		return
 	}
