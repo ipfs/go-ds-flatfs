@@ -7,7 +7,7 @@ https://github.com/multiformats/multibase) without the 'B' prefix.
 All the object files are placed in a tree of directories, based on a
 function of the CID. This is a form of sharding similar to
 the objects directory in git repositories. Previously, we used
-prefixes, we now use the next-to-last two charters.
+prefixes, we now use the next-to-last two characters.
 
     func NextToLast(base32cid string) {
       nextToLastLen := 2
