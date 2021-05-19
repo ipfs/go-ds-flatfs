@@ -87,7 +87,7 @@ func ParseShardFunc(str string) (*ShardIdV1, error) {
 
 	version := parts[0]
 	if version != "v1" {
-		return nil, fmt.Errorf("expected 'v1' for version string got: %s\n", version)
+		return nil, fmt.Errorf("expected 'v1' for version string got: %s", version)
 	}
 
 	funName := parts[1]
