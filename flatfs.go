@@ -97,6 +97,9 @@ func combineAccuracy(a, b initAccuracy) initAccuracy {
 }
 
 var _ datastore.Datastore = (*Datastore)(nil)
+var _ datastore.PersistentDatastore = (*Datastore)(nil)
+var _ datastore.Batching = (*Datastore)(nil)
+var _ datastore.Batch = (*flatfsBatch)(nil)
 
 var (
 	ErrDatastoreExists       = errors.New("datastore already exists")
@@ -1091,7 +1094,7 @@ func (fs *Datastore) readDiskUsageFile() int64 {
 //
 // The size is approximative and may slightly differ from
 // the real disk values.
-func (fs *Datastore) DiskUsage() (uint64, error) {
+func (fs *Datastore) DiskUsage(ctx context.Context) (uint64, error) {
 	// it may differ from real disk values if
 	// the filesystem has allocated for blocks
 	// for a directory because it has many files in it

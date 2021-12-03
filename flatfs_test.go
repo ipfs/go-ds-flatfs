@@ -541,7 +541,7 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	defer fs.Close()
 
 	time.Sleep(100 * time.Millisecond)
-	duNew, err := fs.DiskUsage()
+	duNew, err := fs.DiskUsage(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -558,7 +558,7 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	time.Sleep(100 * time.Millisecond)
-	duElems, err := fs.DiskUsage()
+	duElems, err := fs.DiskUsage(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -573,13 +573,13 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	time.Sleep(100 * time.Millisecond)
-	duDelete, err := fs.DiskUsage()
+	duDelete, err := fs.DiskUsage(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Log("duPostDelete:", duDelete)
 
-	du, err := fs.DiskUsage()
+	du, err := fs.DiskUsage(bg)
 	t.Log("duFinal:", du)
 	if err != nil {
 		t.Fatal(err)
@@ -616,7 +616,7 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 		t.Fatalf("New fail: %v\n", err)
 	}
 
-	duReopen, err := fs.DiskUsage()
+	duReopen, err := fs.DiskUsage(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -692,9 +692,9 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 	count = 1
 	wg.Add(2)
 	put()
-	du, _ := fs.DiskUsage()
+	du, _ := fs.DiskUsage(bg)
 	del()
-	du2, _ := fs.DiskUsage()
+	du2, _ := fs.DiskUsage(bg)
 	if du-10 != du2 {
 		t.Error("should have deleted exactly 10 bytes:", du, du2)
 	}
@@ -708,7 +708,7 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 	go del()
 	wg.Wait()
 
-	du3, _ := fs.DiskUsage()
+	du3, _ := fs.DiskUsage(bg)
 	has, err := fs.Has(bg, testKey)
 	if err != nil {
 		t.Fatal(err)
@@ -780,12 +780,12 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 	wg.Add(2)
 	put()
 	commit()
-	du, err := fs.DiskUsage()
+	du, err := fs.DiskUsage(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
 	del()
-	du2, err := fs.DiskUsage()
+	du2, err := fs.DiskUsage(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +800,7 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 	go del()
 	wg.Wait()
 
-	du3, err := fs.DiskUsage()
+	du3, err := fs.DiskUsage(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -858,7 +858,7 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 		t.Fatalf("Open fail: %v\n", err)
 	}
 
-	duReopen, err := fs.DiskUsage()
+	duReopen, err := fs.DiskUsage(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -875,7 +875,7 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 		t.Fatalf("Open fail: %v\n", err)
 	}
 
-	duEst, err := fs.DiskUsage()
+	duEst, err := fs.DiskUsage(bg)
 	if err != nil {
 		t.Fatal(err)
 	}
