@@ -7,4 +7,15 @@ require (
 	github.com/jbenet/goprocess v0.1.4
 )
 
-go 1.16
+require (
+	github.com/gogo/protobuf v1.2.1 // indirect
+	github.com/google/uuid v1.1.1 // indirect
+	github.com/ipfs/go-detect-race v0.0.1 // indirect
+	github.com/ipfs/go-log/v2 v2.0.3 // indirect
+	github.com/opentracing/opentracing-go v1.1.0 // indirect
+	go.uber.org/atomic v1.6.0 // indirect
+	go.uber.org/multierr v1.5.0 // indirect
+	go.uber.org/zap v1.10.0 // indirect
+)
+
+go 1.17
