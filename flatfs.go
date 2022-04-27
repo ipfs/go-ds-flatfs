@@ -48,7 +48,7 @@ var (
 	// calculating the DiskUsage upon a start when no
 	// DiskUsageFile is present.
 	// If this period did not suffice to read the size of the datastore,
-	// the remaining sizes will be stimated.
+	// the remaining sizes will be estimated.
 	DiskUsageCalcTimeout = 5 * time.Minute
 	// RetryDelay is a timeout for a backoff on retrying operations
 	// that fail due to transient errors like too many file descriptors open.
@@ -118,7 +118,7 @@ func init() {
 // write operations to the same key. See the explanation in
 // Put().
 type Datastore struct {
-	// atmoic operations should always be used with diskUsage.
+	// atomic operations should always be used with diskUsage.
 	// Must be first in struct to ensure correct alignment
 	// (see https://golang.org/pkg/sync/atomic/#pkg-note-BUG)
 	diskUsage int64
@@ -129,7 +129,7 @@ type Datastore struct {
 	shardStr string
 	getDir   ShardFunc
 
-	// sychronize all writes and directory changes for added safety
+	// synchronize all writes and directory changes for added safety
 	sync bool
 
 	// these values should only be used during internalization or
@@ -167,6 +167,8 @@ type op struct {
 	v    []byte        // value
 }
 
+// opMap is a synchronisation structure where a single op can be stored
+// for each key.
 type opMap struct {
 	ops sync.Map
 }
@@ -179,7 +181,11 @@ type opResult struct {
 	name  string
 }
 
-// Returns nil if there's nothing to do.
+// Begins starts the processing of an op:
+// - if no other op for the same key exist, register it and return immediately
+// - if another op exist for the same key, wait until it's done:
+// 		- if that previous op succeeded, consider that ours shouldn't execute and return nil
+// 		- if that previous op failed, start ours
 func (m *opMap) Begin(name string) *opResult {
 	for {
 		myOp := &opResult{opMap: m, name: name}
@@ -305,6 +311,8 @@ func (fs *Datastore) ShardStr() string {
 	return fs.shardStr
 }
 
+// encode returns the directory and file names for a given key according to
+// the sharding function.
 func (fs *Datastore) encode(key datastore.Key) (dir, file string) {
 	noslash := key.String()[1:]
 	dir = filepath.Join(fs.path, fs.getDir(noslash))
@@ -312,6 +320,8 @@ func (fs *Datastore) encode(key datastore.Key) (dir, file string) {
 	return dir, file
 }
 
+// decode returns the datastore.Key corresponding to a file name, according
+// to the sharding function.
 func (fs *Datastore) decode(file string) (key datastore.Key, ok bool) {
 	if !strings.HasSuffix(file, extension) {
 		// We expect random files like "put-". Log when we encounter
@@ -325,6 +335,8 @@ func (fs *Datastore) decode(file string) (key datastore.Key, ok bool) {
 	return datastore.NewKey(name), true
 }
 
+// makeDir is identical to makeDirNoSync but also enforce the sync
+// if required by the config.
 func (fs *Datastore) makeDir(dir string) error {
 	created, err := fs.makeDirNoSync(dir)
 	if err != nil {
@@ -372,7 +384,7 @@ func (fs *Datastore) renameAndUpdateDiskUsage(tmpPath, path string) error {
 
 	// Rename and add new file's diskUsage. If the rename fails,
 	// it will either a) Re-add the size of an existing file, which
-	// was sustracted before b) Add 0 if there is no existing file.
+	// was subtracted before b) Add 0 if there is no existing file.
 	for i := 0; i < RetryAttempts; i++ {
 		err = rename(tmpPath, path)
 		// if there's no error, or the source file doesn't exist, abort.
@@ -574,6 +586,8 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 		return nil
 	}
 
+	// Start by writing all the data in temp files so that we can be sure that
+	// all the data is on disk before renaming to the final places.
 	for key, value := range data {
 		dir, path := fs.encode(key)
 		if _, err := fs.makeDirNoSync(dir); err != nil {
@@ -974,6 +988,7 @@ func (fs *Datastore) updateDiskUsage(path string, add bool) {
 	}
 }
 
+// checkpointDiskUsage triggers a disk usage checkpoint write.
 func (fs *Datastore) checkpointDiskUsage() {
 	select {
 	case fs.checkpointCh <- struct{}{}:
@@ -983,6 +998,8 @@ func (fs *Datastore) checkpointDiskUsage() {
 	}
 }
 
+// checkpointLoop periodically or following checkpoint event, write the current
+// disk usage on disk.
 func (fs *Datastore) checkpointLoop() {
 	defer close(fs.done)
 
@@ -1026,6 +1043,7 @@ func (fs *Datastore) checkpointLoop() {
 	}
 }
 
+// writeDiskUsageFile write the given checkpoint disk usage in a file.
 func (fs *Datastore) writeDiskUsageFile(du int64, doSync bool) {
 	tmp, err := fs.tempFile()
 	if err != nil {

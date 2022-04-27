@@ -31,6 +31,8 @@ func (f *ShardIdV1) Func() ShardFunc {
 	return f.fun
 }
 
+// Prefix returns a sharding function taking the first prefixLen characters of the key.
+// If too short, the key is padded with "_".
 func Prefix(prefixLen int) *ShardIdV1 {
 	padding := strings.Repeat("_", prefixLen)
 	return &ShardIdV1{
@@ -42,6 +44,8 @@ func Prefix(prefixLen int) *ShardIdV1 {
 	}
 }
 
+// Prefix returns a sharding function taking the last suffixLen characters of the key.
+// If too short, the key is padded with "_".
 func Suffix(suffixLen int) *ShardIdV1 {
 	padding := strings.Repeat("_", suffixLen)
 	return &ShardIdV1{
@@ -54,6 +58,9 @@ func Suffix(suffixLen int) *ShardIdV1 {
 	}
 }
 
+// Prefix returns a sharding function taking the suffixLen characters of the key
+// before the very last character.
+// If too short, the key is padded with "_".
 func NextToLast(suffixLen int) *ShardIdV1 {
 	padding := strings.Repeat("_", suffixLen+1)
 	return &ShardIdV1{
