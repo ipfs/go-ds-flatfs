@@ -376,7 +376,7 @@ func (fs *Datastore) renameAndUpdateDiskUsage(tmpPath, path string) error {
 	fi, err := os.Stat(path)
 
 	// Destination exists, we need to discount it from diskUsage
-	if fs != nil && err == nil {
+	if fi != nil && err == nil {
 		atomic.AddInt64(&fs.diskUsage, -fi.Size())
 	} else if !os.IsNotExist(err) {
 		return err
