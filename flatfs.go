@@ -766,7 +766,7 @@ func (fs *Datastore) Query(ctx context.Context, q query.Query) (query.Results, e
 	// to `Close`.
 	b := query.NewResultBuilder(q)
 	b.Process.Go(func(p goprocess.Process) {
-		err := fs.walkTopLevel(fs.path, b)
+		err := fs.walkTopLevel(ctx, fs.path, b)
 		if err == nil {
 			return
 		}
@@ -782,7 +782,7 @@ func (fs *Datastore) Query(ctx context.Context, q query.Query) (query.Results, e
 	return query.NaiveQueryApply(q, b.Results()), nil
 }
 
-func (fs *Datastore) walkTopLevel(path string, result *query.ResultBuilder) error {
+func (fs *Datastore) walkTopLevel(ctx context.Context, path string, result *query.ResultBuilder) error {
 	dir, err := os.Open(path)
 	if err != nil {
 		return err
@@ -801,13 +801,15 @@ func (fs *Datastore) walkTopLevel(path string, result *query.ResultBuilder) erro
 			continue
 		}
 
-		err = fs.walk(filepath.Join(path, dir), result)
+		err = fs.walk(ctx, filepath.Join(path, dir), result)
 		if err != nil {
 			return err
 		}
 
 		// Are we closing?
 		select {
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-result.Process.Closing():
 			return nil
 		default:
@@ -1123,7 +1125,7 @@ func (fs *Datastore) tempFileOnce() (*os.File, error) {
 }
 
 // only call this on directories.
-func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
+func (fs *Datastore) walk(ctx context.Context, path string, qrb *query.ResultBuilder) error {
 	dir, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1174,6 +1176,8 @@ func (fs *Datastore) walk(path string, qrb *query.ResultBuilder) error {
 
 		select {
 		case qrb.Output <- result:
+		case <-ctx.Done():
+			return ctx.Err()
 		case <-qrb.Process.Closing():
 			return nil
 		}
