@@ -718,7 +718,7 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 		if du3 != du {
 			t.Error("du should be the same as after first put:", du, du3)
 		}
-	} else { //delete came last
+	} else { // delete came last
 		if du3 != du2 {
 			t.Error("du should be the same as after first delete:", du2, du3)
 		}
@@ -1036,14 +1036,25 @@ func TestNoCluster(t *testing.T) {
 
 	r := rand.New(rand.NewSource(0))
 	N := 3200 // should be divisible by 32 so the math works out
-	for i := 0; i < N; i++ {
-		blk := make([]byte, 1000)
-		r.Read(blk)
-
-		key := "CIQ" + base32.StdEncoding.EncodeToString(blk[:10])
-		err := fs.Put(bg, datastore.NewKey(key), blk)
+	batchSize := 100
+	for i := 0; i < N/batchSize; i++ {
+		batch, err := fs.Batch(bg)
 		if err != nil {
-			t.Fatalf("Put fail: %v\n", err)
+			t.Fatalf("Batch fail: %v\n", err)
+		}
+		for j := 0; j < batchSize; j++ {
+			blk := make([]byte, 1000)
+			r.Read(blk)
+			key := "CIQ" + base32.StdEncoding.EncodeToString(blk[:10])
+
+			err = batch.Put(bg, datastore.NewKey(key), blk)
+			if err != nil {
+				t.Fatalf("Batch Put fail: %v\n", err)
+			}
+		}
+		err = batch.Commit(bg)
+		if err != nil {
+			t.Fatalf("Batch Commit fail: %v\n", err)
 		}
 	}
 
@@ -1161,11 +1172,19 @@ func TestQueryLeak(t *testing.T) {
 	}
 	defer fs.Close()
 
+	batch, err := fs.Batch(bg)
+	if err != nil {
+		t.Fatalf("Batch fail: %v\n", err)
+	}
 	for i := 0; i < 1000; i++ {
-		err = fs.Put(bg, datastore.NewKey(fmt.Sprint(i)), []byte("foobar"))
+		err = batch.Put(bg, datastore.NewKey(fmt.Sprint(i)), []byte("foobar"))
 		if err != nil {
-			t.Fatalf("Put fail: %v\n", err)
+			t.Fatalf("Batch Put fail: %v\n", err)
 		}
+	}
+	err = batch.Commit(bg)
+	if err != nil {
+		t.Fatalf("Batch Commit fail: %v\n", err)
 	}
 
 	before := runtime.NumGoroutine()
