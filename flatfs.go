@@ -326,7 +326,8 @@ func (fs *Datastore) decode(file string) (key datastore.Key, ok bool) {
 }
 
 func (fs *Datastore) makeDir(dir string) error {
-	if err := fs.makeDirNoSync(dir); err != nil {
+	created, err := fs.makeDirNoSync(dir)
+	if err != nil {
 		return err
 	}
 
@@ -334,7 +335,7 @@ func (fs *Datastore) makeDir(dir string) error {
 	// it, the creation of the prefix dir itself might not be
 	// durable yet. Sync the root dir after a successful mkdir of
 	// a prefix dir, just to be paranoid.
-	if fs.sync {
+	if fs.sync && created {
 		if err := syncDir(fs.path); err != nil {
 			return err
 		}
@@ -342,19 +343,19 @@ func (fs *Datastore) makeDir(dir string) error {
 	return nil
 }
 
-func (fs *Datastore) makeDirNoSync(dir string) error {
+// makeDirNoSync create a directory on disk and report if it was created or
+// already existed.
+func (fs *Datastore) makeDirNoSync(dir string) (created bool, err error) {
 	if err := os.Mkdir(dir, 0755); err != nil {
-		// EEXIST is safe to ignore here, that just means the prefix
-		// directory already existed.
-		if !os.IsExist(err) {
-			return err
+		if os.IsExist(err) {
+			return false, nil
 		}
-		return nil
+		return false, err
 	}
 
 	// Track DiskUsage of this NEW folder
 	fs.updateDiskUsage(dir, true)
-	return nil
+	return true, nil
 }
 
 // This function always runs under an opLock. Therefore, only one thread is
@@ -575,7 +576,7 @@ func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
 
 	for key, value := range data {
 		dir, path := fs.encode(key)
-		if err := fs.makeDirNoSync(dir); err != nil {
+		if _, err := fs.makeDirNoSync(dir); err != nil {
 			return err
 		}
 		dirsToSync[dir] = struct{}{}
