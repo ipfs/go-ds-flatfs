@@ -12,7 +12,7 @@ package flatfs
 
 import (
 	"bytes"
-	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -83,19 +83,23 @@ func readFileOnce(filename string) ([]byte, error) {
 	defer f.Close()
 	// It's a good but not certain bet that FileInfo will tell us exactly how much to
 	// read, so let's try it but be prepared for the answer to be wrong.
-	var n int64 = bytes.MinRead
+	var sizeHint int = bytes.MinRead
 
 	if fi, err := f.Stat(); err == nil {
-		// As initial capacity for readAll, use Size + a little extra in case Size
-		// is zero, and to avoid another allocation after Read has filled the
-		// buffer. The readAll call will read into its allocated internal buffer
-		// cheaply. If the size was wrong, we'll either waste some space off the end
-		// or reallocate as needed, but in the overwhelmingly common case we'll get
-		// it just right.
-		if size := fi.Size() + bytes.MinRead; size > n {
-			n = size
+		if sz := fi.Size(); sz <= math.MaxInt {
+			if sz := int(sz); sz > sizeHint {
+				sizeHint = sz
+			}
 		}
+		sizeHint++ // one byte for final read at EOF
 	}
 
-	return io.ReadAll(f)
+	var buf bytes.Buffer
+	buf.Grow(sizeHint)
+	_, err = buf.ReadFrom(f)
+	if err != nil {
+		return nil, err
+	}
+
+	return buf.Bytes(), nil
 }
