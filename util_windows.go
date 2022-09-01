@@ -12,7 +12,7 @@ package flatfs
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -97,5 +97,5 @@ func readFileOnce(filename string) ([]byte, error) {
 		}
 	}
 
-	return ioutil.ReadAll(f)
+	return io.ReadAll(f)
 }

@@ -3,14 +3,13 @@
 package flatfs
 
 import (
-	"io/ioutil"
 	"os"
 )
 
 func tempFileOnce(dir, pattern string) (*os.File, error) {
-	return ioutil.TempFile(dir, pattern)
+	return os.CreateTemp(dir, pattern)
 }
 
 func readFileOnce(filename string) ([]byte, error) {
-	return ioutil.ReadFile(filename)
+	return os.ReadFile(filename)
 }

@@ -184,8 +184,8 @@ type opResult struct {
 // Begins starts the processing of an op:
 // - if no other op for the same key exist, register it and return immediately
 // - if another op exist for the same key, wait until it's done:
-// 		- if that previous op succeeded, consider that ours shouldn't execute and return nil
-// 		- if that previous op failed, start ours
+//   - if that previous op succeeded, consider that ours shouldn't execute and return nil
+//   - if that previous op failed, start ours
 func (m *opMap) Begin(name string) *opResult {
 	for {
 		myOp := &opResult{opMap: m, name: name}
