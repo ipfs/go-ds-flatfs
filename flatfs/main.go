@@ -5,7 +5,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/ipfs/go-ds-flatfs"
+	flatfs "github.com/ipfs/go-ds-flatfs"
 )
 
 // To convert from the old format to a new format with a different

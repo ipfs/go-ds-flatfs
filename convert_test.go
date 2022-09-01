@@ -3,7 +3,6 @@ package flatfs_test
 import (
 	"bytes"
 	"encoding/base32"
-	"io/ioutil"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -22,7 +21,7 @@ func TestMove(t *testing.T) {
 	v1dir := filepath.Join(tempdir, "v1")
 	createDatastore(t, v1dir, flatfs.Prefix(3))
 
-	err := ioutil.WriteFile(filepath.Join(v1dir, "README_ALSO"), []byte("something"), 0666)
+	err := os.WriteFile(filepath.Join(v1dir, "README_ALSO"), []byte("something"), 0666)
 	if err != nil {
 		t.Fatalf("WriteFile fail: %v\n", err)
 	}

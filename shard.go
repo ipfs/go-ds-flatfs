@@ -2,7 +2,6 @@ package flatfs
 
 import (
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -118,7 +117,7 @@ func ParseShardFunc(str string) (*ShardIdV1, error) {
 }
 
 func ReadShardFunc(dir string) (*ShardIdV1, error) {
-	buf, err := ioutil.ReadFile(filepath.Join(dir, SHARDING_FN))
+	buf, err := os.ReadFile(filepath.Join(dir, SHARDING_FN))
 	if os.IsNotExist(err) {
 		return nil, ErrShardingFileMissing
 	} else if err != nil {
@@ -143,7 +142,7 @@ func WriteShardFunc(dir string, id *ShardIdV1) error {
 
 func WriteReadme(dir string, id *ShardIdV1) error {
 	if id.String() == IPFS_DEF_SHARD.String() {
-		err := ioutil.WriteFile(filepath.Join(dir, README_FN), []byte(README_IPFS_DEF_SHARD), 0444)
+		err := os.WriteFile(filepath.Join(dir, README_FN), []byte(README_IPFS_DEF_SHARD), 0444)
 		if err != nil {
 			return err
 		}

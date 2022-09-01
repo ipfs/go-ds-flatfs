@@ -5,7 +5,6 @@ import (
 	"encoding/base32"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"math"
 	"math/rand"
 	"os"
@@ -47,7 +46,7 @@ func checkTemp(t *testing.T, dir string) {
 }
 
 func tempdir(t testing.TB) (path string, cleanup func()) {
-	path, err := ioutil.TempDir("", "test-datastore-flatfs-")
+	path, err := os.MkdirTemp("", "test-datastore-flatfs-")
 	if err != nil {
 		t.Fatalf("cannot create temp directory: %v", err)
 	}
@@ -281,7 +280,7 @@ func testStorage(p *params, t *testing.T) {
 		case ".", "..", "SHARDING", flatfs.DiskUsageFile, ".temp":
 			// ignore
 		case "_README":
-			_, err := ioutil.ReadFile(absPath)
+			_, err := os.ReadFile(absPath)
 			if err != nil {
 				t.Error("could not read _README file")
 			}
@@ -587,7 +586,7 @@ func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
 	fs.Close()
 
 	// Check that disk usage file is correct
-	duB, err := ioutil.ReadFile(filepath.Join(temp, flatfs.DiskUsageFile))
+	duB, err := os.ReadFile(filepath.Join(temp, flatfs.DiskUsageFile))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1012,7 +1011,7 @@ func TestNonDatastoreDir(t *testing.T) {
 	tempdir, cleanup := tempdir(t)
 	defer cleanup()
 
-	err := ioutil.WriteFile(filepath.Join(tempdir, "afile"), []byte("Some Content"), 0644)
+	err := os.WriteFile(filepath.Join(tempdir, "afile"), []byte("Some Content"), 0644)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1059,7 +1058,7 @@ func TestNoCluster(t *testing.T) {
 	}
 
 	fs.Close()
-	dirs, err := ioutil.ReadDir(tempdir)
+	dirs, err := os.ReadDir(tempdir)
 	if err != nil {
 		t.Fatalf("ReadDir fail: %v\n", err)
 	}
@@ -1072,7 +1071,7 @@ func TestNoCluster(t *testing.T) {
 			continue
 		}
 		count += 1
-		files, err := ioutil.ReadDir(filepath.Join(tempdir, dir.Name()))
+		files, err := os.ReadDir(filepath.Join(tempdir, dir.Name()))
 		if err != nil {
 			t.Fatalf("ReadDir fail: %v\n", err)
 		}
