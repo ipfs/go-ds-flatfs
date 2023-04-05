@@ -8,7 +8,7 @@ require (
 )
 
 require (
-	github.com/gogo/protobuf v1.2.1 // indirect
+	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.1.1 // indirect
 	github.com/ipfs/go-detect-race v0.0.1 // indirect
 	github.com/ipfs/go-log/v2 v2.0.3 // indirect
