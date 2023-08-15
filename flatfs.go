@@ -109,8 +109,12 @@ var (
 	ErrInvalidKey            = errors.New("key not supported by flatfs")
 )
 
+var (
+	r *rand.Rand
+)
+
 func init() {
-	rand.Seed(time.Now().UTC().UnixNano())
+	r = rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
 }
 
 // Datastore implements the go-datastore Interface.
@@ -866,7 +870,7 @@ func folderSize(path string, deadline time.Time) (int64, initAccuracy, error) {
 	// randomize file order
 	// https://stackoverflow.com/a/42776696
 	for i := len(files) - 1; i > 0; i-- {
-		j := rand.Intn(i + 1)
+		j := r.Intn(i + 1)
 		files[i], files[j] = files[j], files[i]
 	}
 
