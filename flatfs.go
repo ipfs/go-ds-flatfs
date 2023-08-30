@@ -22,7 +22,7 @@ import (
 	"github.com/ipfs/go-datastore/query"
 	"github.com/jbenet/goprocess"
 
-	logging "github.com/ipfs/go-log"
+	logging "github.com/ipfs/go-log/v2"
 )
 
 var log = logging.Logger("flatfs")
