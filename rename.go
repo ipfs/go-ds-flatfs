@@ -4,4 +4,6 @@ package flatfs
 
 import "os"
 
-var rename = os.Rename
+func rename(a, b string) error {
+	return os.Rename(a, b)
+}
