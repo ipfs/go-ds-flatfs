@@ -14,6 +14,7 @@ See the restrictions section for details.
 ## Lead Maintainer
 
 [Mayank Pandey](https://github.com/LexLuthr)
+[Alvin Reyes](https://github.com/alvin-reyes)
 
 ## Table of Contents
 
