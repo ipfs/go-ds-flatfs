@@ -39,9 +39,13 @@ you can use this plugin with a vanilla Kubo by replacing the `github.com/ipfs/go
 `plugin/plugins/flatfs/flatfs.go`
 
 Please make sure to setup your renterd() first. Once it is running, export the following variables to a terminal and initiate a new IPFS node.
-`IPFS_SIA_RENTERD_PASSWORD`
-`IPFS_SIA_RENTERD_WORKER_ADDRESS`
-`IPFS_SIA_RENTERD_BUCKET(optional: default=IPFS)`
+
+| Env Var                   | Default  | Description                                                              |
+|---------------------------|----------|--------------------------------------------------------------------------|
+| `IPFS_SIA_RENTERD_PASSWORD` |          | Renterd Password                                                         |
+|`IPFS_SIA_RENTERD_WORKER_ADDRESS`|          | Renterd worker API address (ex: http://127.0.0.1:9980)                   |
+|`IPFS_SIA_RENTERD_BUCKET`| IPFS     | A private bucket with this name will be created and used                 |
+|`IPFS_SIA_SYNC_DELETE`| False(0) | If set to True(1), the DELETE operation will be synced to Renterd bucket |
 
 ### Restrictions
 
