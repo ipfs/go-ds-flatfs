@@ -598,6 +598,13 @@ func (fs *Datastore) doPut(ctx context.Context, key datastore.Key, val []byte) e
 	}
 	closed = true
 
+	_, rpath := fs.encodeForRenterd(key)
+
+	_, err = fs.wClient.UploadObject(ctx, bytes.NewReader(val), fs.bucket, rpath, rapi.UploadObjectOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to upload the object %s to renterd backend: %w", rpath, err)
+	}
+
 	err = fs.renameAndUpdateDiskUsage(tmp.Name(), path)
 	if err != nil {
 		return err
@@ -608,13 +615,6 @@ func (fs *Datastore) doPut(ctx context.Context, key datastore.Key, val []byte) e
 		if err := syncDir(dir); err != nil {
 			return err
 		}
-	}
-
-	_, rpath := fs.encodeForRenterd(key)
-
-	_, err = fs.wClient.UploadObject(ctx, bytes.NewReader(val), fs.bucket, rpath, rapi.UploadObjectOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to upload the object %s to renterd backend: %w", rpath, err)
 	}
 
 	return nil
