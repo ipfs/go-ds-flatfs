@@ -42,7 +42,7 @@ func TestMove(t *testing.T) {
 	// make sure the README file moved
 	_, err = os.Stat(filepath.Join(v2dir, "README_ALSO"))
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 	}
 
 	// check that all keys are available
@@ -52,7 +52,7 @@ func TestMove(t *testing.T) {
 	shard := filepath.Join(v2dir, flatfs.NextToLast(2).Func()(keys[0].String()))
 	_, err = os.Stat(shard)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 	}
 }
 
@@ -128,7 +128,7 @@ func TestMoveRestart(t *testing.T) {
 	shard := filepath.Join(v2dir, flatfs.NextToLast(2).Func()(keys[0].String()))
 	_, err = os.Stat(shard)
 	if err != nil {
-		t.Fatalf(err.Error())
+		t.Fatal(err.Error())
 	}
 }
 
