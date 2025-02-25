@@ -20,7 +20,6 @@ import (
 
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/query"
-	"github.com/jbenet/goprocess"
 
 	logging "github.com/ipfs/go-log/v2"
 )
@@ -783,25 +782,23 @@ func (fs *Datastore) Query(ctx context.Context, q query.Query) (query.Results, e
 
 	// Replicates the logic in ResultsWithChan but actually respects calls
 	// to `Close`.
-	b := query.NewResultBuilder(q)
-	b.Process.Go(func(p goprocess.Process) {
-		err := fs.walkTopLevel(ctx, fs.path, b)
+	results := query.ResultsWithContext(q, func(qctx context.Context, output chan<- query.Result) {
+		err := fs.walkTopLevel(ctx, qctx, q, fs.path, output)
 		if err == nil {
 			return
 		}
 		select {
-		case b.Output <- query.Result{Error: errors.New("walk failed: " + err.Error())}:
-		case <-p.Closing():
+		case output <- query.Result{Error: errors.New("walk failed: " + err.Error())}:
+		case <-qctx.Done():
 		}
 	})
-	go b.Process.CloseAfterChildren() //nolint
 
 	// We don't apply _any_ of the query logic ourselves so we'll leave it
 	// all up to the naive query engine.
-	return query.NaiveQueryApply(q, b.Results()), nil
+	return query.NaiveQueryApply(q, results), nil
 }
 
-func (fs *Datastore) walkTopLevel(ctx context.Context, path string, result *query.ResultBuilder) error {
+func (fs *Datastore) walkTopLevel(ctx, qctx context.Context, q query.Query, path string, output chan<- query.Result) error {
 	dir, err := os.Open(path)
 	if err != nil {
 		return err
@@ -820,7 +817,7 @@ func (fs *Datastore) walkTopLevel(ctx context.Context, path string, result *quer
 			continue
 		}
 
-		err = fs.walk(ctx, filepath.Join(path, dir), result)
+		err = fs.walk(ctx, qctx, q, filepath.Join(path, dir), output)
 		if err != nil {
 			return err
 		}
@@ -829,7 +826,7 @@ func (fs *Datastore) walkTopLevel(ctx context.Context, path string, result *quer
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-result.Process.Closing():
+		case <-qctx.Done():
 			return nil
 		default:
 		}
@@ -1148,7 +1145,7 @@ func (fs *Datastore) tempFileOnce() (*os.File, error) {
 }
 
 // only call this on directories.
-func (fs *Datastore) walk(ctx context.Context, path string, qrb *query.ResultBuilder) error {
+func (fs *Datastore) walk(ctx, qctx context.Context, q query.Query, path string, output chan<- query.Result) error {
 	dir, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1177,7 +1174,7 @@ func (fs *Datastore) walk(ctx context.Context, path string, qrb *query.ResultBui
 
 		var result query.Result
 		result.Key = key.String()
-		if !qrb.Query.KeysOnly {
+		if !q.KeysOnly {
 			value, err := readFile(filepath.Join(path, fn))
 			if err != nil {
 				result.Error = err
@@ -1187,7 +1184,7 @@ func (fs *Datastore) walk(ctx context.Context, path string, qrb *query.ResultBui
 				result.Value = value
 				result.Size = len(value)
 			}
-		} else if qrb.Query.ReturnsSizes {
+		} else if q.ReturnsSizes {
 			var stat os.FileInfo
 			stat, err := os.Stat(filepath.Join(path, fn))
 			if err != nil {
@@ -1198,10 +1195,10 @@ func (fs *Datastore) walk(ctx context.Context, path string, qrb *query.ResultBui
 		}
 
 		select {
-		case qrb.Output <- result:
+		case output <- result:
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-qrb.Process.Closing():
+		case <-qctx.Done():
 			return nil
 		}
 	}
