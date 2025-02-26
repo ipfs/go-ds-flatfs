@@ -4,7 +4,7 @@ go 1.23
 
 require (
 	github.com/alexbrainman/goissue34681 v0.0.0-20191006012335-3fc7a47baff5
-	github.com/ipfs/go-datastore v0.7.1-0.20250225204649-1676d105e588
+	github.com/ipfs/go-datastore v0.7.1-0.20250226000051-0dbca94435fd
 	github.com/ipfs/go-log/v2 v2.1.3
 )
 
