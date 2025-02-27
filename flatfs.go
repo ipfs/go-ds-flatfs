@@ -783,13 +783,12 @@ func (fs *Datastore) Query(ctx context.Context, q query.Query) (query.Results, e
 	// Replicates the logic in ResultsWithChan but actually respects calls
 	// to `Close`.
 	results := query.ResultsWithContext(q, func(qctx context.Context, output chan<- query.Result) {
-		err := fs.walkTopLevel(ctx, qctx, q, fs.path, output)
-		if err == nil {
-			return
-		}
-		select {
-		case output <- query.Result{Error: errors.New("walk failed: " + err.Error())}:
-		case <-qctx.Done():
+		err := fs.walkTopLevel(qctx, q, fs.path, output)
+		if err != nil {
+			select {
+			case output <- query.Result{Error: errors.New("walk failed: " + err.Error())}:
+			case <-qctx.Done():
+			}
 		}
 	})
 
@@ -798,7 +797,7 @@ func (fs *Datastore) Query(ctx context.Context, q query.Query) (query.Results, e
 	return query.NaiveQueryApply(q, results), nil
 }
 
-func (fs *Datastore) walkTopLevel(ctx, qctx context.Context, q query.Query, path string, output chan<- query.Result) error {
+func (fs *Datastore) walkTopLevel(ctx context.Context, q query.Query, path string, output chan<- query.Result) error {
 	dir, err := os.Open(path)
 	if err != nil {
 		return err
@@ -817,7 +816,7 @@ func (fs *Datastore) walkTopLevel(ctx, qctx context.Context, q query.Query, path
 			continue
 		}
 
-		err = fs.walk(ctx, qctx, q, filepath.Join(path, dir), output)
+		err = fs.walk(ctx, q, filepath.Join(path, dir), output)
 		if err != nil {
 			return err
 		}
@@ -826,8 +825,6 @@ func (fs *Datastore) walkTopLevel(ctx, qctx context.Context, q query.Query, path
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-qctx.Done():
-			return nil
 		default:
 		}
 	}
@@ -1145,7 +1142,7 @@ func (fs *Datastore) tempFileOnce() (*os.File, error) {
 }
 
 // only call this on directories.
-func (fs *Datastore) walk(ctx, qctx context.Context, q query.Query, path string, output chan<- query.Result) error {
+func (fs *Datastore) walk(ctx context.Context, q query.Query, path string, output chan<- query.Result) error {
 	dir, err := os.Open(path)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -1198,8 +1195,6 @@ func (fs *Datastore) walk(ctx, qctx context.Context, q query.Query, path string,
 		case output <- result:
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-qctx.Done():
-			return nil
 		}
 	}
 	return nil
