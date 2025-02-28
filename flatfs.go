@@ -108,14 +108,6 @@ var (
 	ErrInvalidKey            = errors.New("key not supported by flatfs")
 )
 
-var (
-	r *rand.Rand
-)
-
-func init() {
-	r = rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
-}
-
 // Datastore implements the go-datastore Interface.
 // Note this datastore cannot guarantee order of concurrent
 // write operations to the same key. See the explanation in
@@ -862,11 +854,10 @@ func folderSize(path string, deadline time.Time) (int64, initAccuracy, error) {
 	}
 
 	// randomize file order
-	// https://stackoverflow.com/a/42776696
-	for i := len(files) - 1; i > 0; i-- {
-		j := r.Intn(i + 1)
+	r := rand.New(rand.NewSource(time.Now().UTC().UnixNano()))
+	r.Shuffle(len(files), func(i, j int) {
 		files[i], files[j] = files[j], files[i]
-	}
+	})
 
 	accuracy := exactA
 	for {
