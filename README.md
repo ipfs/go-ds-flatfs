@@ -4,21 +4,18 @@
 [![](https://img.shields.io/badge/project-IPFS-blue.svg?style=flat-square)](http://ipfs.io/)
 [![](https://img.shields.io/badge/freenode-%23ipfs-blue.svg?style=flat-square)](http://webchat.freenode.net/?channels=%23ipfs)
 [![standard-readme compliant](https://img.shields.io/badge/standard--readme-OK-green.svg?style=flat-square)](https://github.com/RichardLitt/standard-readme)
-[![GoDoc](https://godoc.org/github.com/ipfs/go-ds-flatfs?status.svg)](https://godoc.org/github.com/ipfs/go-ds-flatfs)
-[![Build Status](https://travis-ci.org/ipfs/go-ds-flatfs.svg?branch=master)](https://travis-ci.org/ipfs/go-ds-flatfs)
+[![GoDoc](https://pkg.go.dev/badge/github.com/ipfs/go-ds-flatfs)](https://pkg.go.dev/github.com/ipfs/go-ds-flatfs)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/ipfs/go-ds-flatfs/go-test.yml?branch=master)](https://github.com/ipfs/go-ds-flatfs/actions)
+
 [![Coverage Status](https://img.shields.io/codecov/c/github/ipfs/go-ds-flatfs.svg)](https://codecov.io/gh/ipfs/go-ds-flatfs)
 
 
 > A datastore implementation using sharded directories and flat files to store data
 
-`go-ds-flatfs` is used by `go-ipfs` to store raw block contents on disk. It supports several sharding functions (prefix, suffix, next-to-last/*).
+`go-ds-flatfs` is used by `kubo` to store raw block contents on disk. It supports several sharding functions (prefix, suffix, next-to-last/*).
 
 It is _not_ a general-purpose datastore and has several important restrictions.
 See the restrictions section for details.
-
-## Lead Maintainer
-
-[Jakub Sztandera](https://github.com/kubuxu)
 
 ## Table of Contents
 
@@ -38,7 +35,7 @@ import "github.com/ipfs/go-ds-flatfs"
 
 ## Usage
 
-Check the [GoDoc module documentation](https://godoc.org/github.com/ipfs/go-ds-flatfs) for an overview of this module's
+Check the [GoDoc module documentation](https://pkg.go.dev/github.com/ipfs/go-ds-flatfs) for an overview of this module's
 functionality.
 
 ### Restrictions
