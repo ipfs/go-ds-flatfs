@@ -1,6 +1,6 @@
 module github.com/ipfs/go-ds-flatfs
 
-go 1.23.8
+go 1.24
 
 require (
 	github.com/alexbrainman/goissue34681 v0.0.0-20191006012335-3fc7a47baff5
