@@ -97,3 +97,66 @@ func isInTempDir(path string) bool {
 	// Check if path starts with .temp/ or contains /.temp/
 	return len(path) >= 6 && (path[:6] == ".temp/" || path[:6] == ".temp\\")
 }
+
+func TestBatchDiscard(t *testing.T) {
+	tryAllShardFuncs(t, testBatchDiscard)
+}
+
+func testBatchDiscard(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+	defer checkTemp(t, temp)
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+	defer fs.Close()
+
+	// Create a batch
+	batch, err := fs.Batch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Put some keys
+	keys := []string{"QUUX", "QAAX", "QBBX"}
+	for _, key := range keys {
+		err = batch.Put(context.Background(), datastore.NewKey(key), []byte("testdata"))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Cast to DiscardableBatch interface
+	discardable, ok := batch.(flatfs.DiscardableBatch)
+	if !ok {
+		t.Fatal("batch does not implement DiscardableBatch interface")
+	}
+
+	// Discard the batch
+	err = discardable.Discard(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that files still don't exist in the main datastore
+	for _, key := range keys {
+		has, err := fs.Has(context.Background(), datastore.NewKey(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if has {
+			t.Errorf("key %s should not exist in datastore after discard", key)
+		}
+	}
+
+	// Verify temp directory was cleaned up
+	tempBatchDirs, err := filepath.Glob(filepath.Join(temp, ".temp", "batch-*"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tempBatchDirs) > 0 {
+		t.Errorf("batch temp directories should be cleaned up after discard, found: %v", tempBatchDirs)
+	}
+}

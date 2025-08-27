@@ -99,6 +99,7 @@ var _ datastore.Datastore = (*Datastore)(nil)
 var _ datastore.PersistentDatastore = (*Datastore)(nil)
 var _ datastore.Batching = (*Datastore)(nil)
 var _ datastore.Batch = (*flatfsBatch)(nil)
+var _ DiscardableBatch = (*flatfsBatch)(nil)
 
 var (
 	ErrDatastoreExists       = errors.New("datastore already exists")
@@ -1086,6 +1087,12 @@ func (fs *Datastore) Close() error {
 	return nil
 }
 
+// DiscardableBatch is an optional interface for batches that support discarding changes
+type DiscardableBatch interface {
+	datastore.Batch
+	Discard(ctx context.Context) error
+}
+
 type flatfsBatch struct {
 	puts    []datastore.Key
 	deletes map[datastore.Key]struct{}
@@ -1162,6 +1169,12 @@ func (bt *flatfsBatch) Delete(ctx context.Context, key datastore.Key) error {
 		bt.deletes[key] = struct{}{}
 	} // otherwise, delete is a no-op anyways.
 	return nil
+}
+
+// Discard discards the batch operations without committing
+func (bt *flatfsBatch) Discard(ctx context.Context) error {
+	// Simply remove the temp directory with all its contents
+	return os.RemoveAll(bt.tempDir)
 }
 
 func (bt *flatfsBatch) Commit(ctx context.Context) error {
