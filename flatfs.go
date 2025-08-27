@@ -1087,7 +1087,7 @@ func (fs *Datastore) Close() error {
 }
 
 type flatfsBatch struct {
-	puts    map[datastore.Key][]byte
+	puts    []datastore.Key
 	deletes map[datastore.Key]struct{}
 
 	ds       *Datastore
@@ -1103,7 +1103,7 @@ func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
 	}
 
 	return &flatfsBatch{
-		puts:      make(map[datastore.Key][]byte),
+		puts:      make([]datastore.Key, 0),
 		deletes:   make(map[datastore.Key]struct{}),
 		ds:        fs,
 		tempDir:   tempDir,
@@ -1153,7 +1153,7 @@ func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) e
 	
 	// Track the file and key
 	bt.tempFiles = append(bt.tempFiles, tempFile)
-	bt.puts[key] = nil // Mark as written but don't store value in memory
+	bt.puts = append(bt.puts, key)
 	return nil
 }
 
@@ -1177,7 +1177,7 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 	dirsToSync := make(map[string]struct{})
 	
 	// First, ensure all destination directories exist
-	for key := range bt.puts {
+	for _, key := range bt.puts {
 		dir, _ := bt.ds.encode(key)
 		if _, err := bt.ds.makeDirNoSync(dir); err != nil {
 			return fmt.Errorf("failed to create directory: %w", err)
@@ -1186,7 +1186,7 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 	}
 
 	// Move all temp files to their final destinations
-	for key := range bt.puts {
+	for _, key := range bt.puts {
 		noslash := key.String()[1:]
 		shardDir := bt.ds.getDir(noslash)
 		tempFile := filepath.Join(bt.tempDir, shardDir, noslash+extension)
