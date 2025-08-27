@@ -533,130 +533,6 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 	return nil
 }
 
-func (fs *Datastore) putMany(data map[datastore.Key][]byte) error {
-	fs.shutdownLock.RLock()
-	defer fs.shutdownLock.RUnlock()
-	if fs.shutdown {
-		return ErrClosed
-	}
-
-	type putManyOp struct {
-		key     datastore.Key
-		file    *os.File
-		dstPath string
-		srcPath string
-	}
-
-	var (
-		dirsToSync = make(map[string]struct{}, len(data))
-		files      = make([]putManyOp, 0, len(data))
-		closed     int
-		removed    int
-	)
-
-	defer func() {
-		for closed < len(files) {
-			files[closed].file.Close()
-			closed++
-		}
-		for removed < len(files) {
-			_ = os.Remove(files[removed].srcPath)
-			removed++
-		}
-	}()
-
-	closer := func() error {
-		for closed < len(files) {
-			fi := files[closed].file
-			if fs.sync {
-				if err := syncFile(fi); err != nil {
-					return err
-				}
-			}
-			if err := fi.Close(); err != nil {
-				return err
-			}
-			closed++
-		}
-		return nil
-	}
-
-	// Start by writing all the data in temp files so that we can be sure that
-	// all the data is on disk before renaming to the final places.
-	for key, value := range data {
-		dir, path := fs.encode(key)
-		if _, err := fs.makeDirNoSync(dir); err != nil {
-			return err
-		}
-		dirsToSync[dir] = struct{}{}
-
-		tmp, err := fs.tempFileOnce()
-
-		// If we have too many files open, try closing some, then try
-		// again repeatedly.
-		if isTooManyFDError(err) {
-			if err = closer(); err != nil {
-				return err
-			}
-			tmp, err = fs.tempFile()
-		}
-
-		if err != nil {
-			return err
-		}
-
-		// Do this _first_ so we close it if writing fails.
-		files = append(files, putManyOp{
-			key:     key,
-			file:    tmp,
-			dstPath: path,
-			srcPath: tmp.Name(),
-		})
-
-		if _, err := tmp.Write(value); err != nil {
-			return err
-		}
-	}
-
-	// Now we sync everything
-	// sync and close files
-	err := closer()
-	if err != nil {
-		return err
-	}
-
-	// move files to their proper places
-	for _, pop := range files {
-		done, err := fs.doWriteOp(&op{
-			typ:  opRename,
-			key:  pop.key,
-			tmp:  pop.srcPath,
-			path: pop.dstPath,
-		})
-		if err != nil {
-			return err
-		} else if !done {
-			_ = os.Remove(pop.file.Name())
-		}
-		removed++
-	}
-
-	// now sync the dirs for those files
-	if fs.sync {
-		for dir := range dirsToSync {
-			if err := syncDir(dir); err != nil {
-				return err
-			}
-		}
-
-		// sync top flatfs dir
-		if err := syncDir(fs.path); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
 
 func (fs *Datastore) Get(ctx context.Context, key datastore.Key) (value []byte, err error) {
 	// Can't exist in datastore.
@@ -1214,14 +1090,24 @@ type flatfsBatch struct {
 	puts    map[datastore.Key][]byte
 	deletes map[datastore.Key]struct{}
 
-	ds *Datastore
+	ds       *Datastore
+	tempDir  string
+	tempFiles []string // track temp files for cleanup
 }
 
 func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
+	// Create a unique temp directory for this batch
+	tempDir := filepath.Join(fs.tempPath, fmt.Sprintf("batch-%d-%d", time.Now().UnixNano(), rand.Int63()))
+	if err := os.Mkdir(tempDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create batch temp directory: %w", err)
+	}
+
 	return &flatfsBatch{
-		puts:    make(map[datastore.Key][]byte),
-		deletes: make(map[datastore.Key]struct{}),
-		ds:      fs,
+		puts:      make(map[datastore.Key][]byte),
+		deletes:   make(map[datastore.Key]struct{}),
+		ds:        fs,
+		tempDir:   tempDir,
+		tempFiles: make([]string, 0),
 	}, nil
 }
 
@@ -1229,7 +1115,45 @@ func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) e
 	if !keyIsValid(key) {
 		return fmt.Errorf("when putting '%q': %v", key, ErrInvalidKey)
 	}
-	bt.puts[key] = val
+	
+	// Write to temp file immediately instead of keeping in memory
+	noslash := key.String()[1:]
+	shardDir := bt.ds.getDir(noslash)
+	tempShardDir := filepath.Join(bt.tempDir, shardDir)
+	
+	// Create shard directory in temp if it doesn't exist
+	if err := os.MkdirAll(tempShardDir, 0755); err != nil {
+		return fmt.Errorf("failed to create temp shard directory: %w", err)
+	}
+	
+	// Write to temp file
+	tempFile := filepath.Join(tempShardDir, noslash+extension)
+	file, err := os.Create(tempFile)
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer file.Close()
+	
+	if _, err := file.Write(val); err != nil {
+		os.Remove(tempFile)
+		return fmt.Errorf("failed to write to temp file: %w", err)
+	}
+	
+	if bt.ds.sync {
+		if err := syncFile(file); err != nil {
+			os.Remove(tempFile)
+			return fmt.Errorf("failed to sync temp file: %w", err)
+		}
+	}
+	
+	if err := file.Close(); err != nil {
+		os.Remove(tempFile)
+		return fmt.Errorf("failed to close temp file: %w", err)
+	}
+	
+	// Track the file and key
+	bt.tempFiles = append(bt.tempFiles, tempFile)
+	bt.puts[key] = nil // Mark as written but don't store value in memory
 	return nil
 }
 
@@ -1241,13 +1165,66 @@ func (bt *flatfsBatch) Delete(ctx context.Context, key datastore.Key) error {
 }
 
 func (bt *flatfsBatch) Commit(ctx context.Context) error {
-	if err := bt.ds.putMany(bt.puts); err != nil {
-		return err
+	bt.ds.shutdownLock.RLock()
+	defer bt.ds.shutdownLock.RUnlock()
+	if bt.ds.shutdown {
+		return ErrClosed
 	}
 
+	// Clean up temp directory on exit
+	defer os.RemoveAll(bt.tempDir)
+
+	dirsToSync := make(map[string]struct{})
+	
+	// First, ensure all destination directories exist
+	for key := range bt.puts {
+		dir, _ := bt.ds.encode(key)
+		if _, err := bt.ds.makeDirNoSync(dir); err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
+		dirsToSync[dir] = struct{}{}
+	}
+
+	// Move all temp files to their final destinations
+	for key := range bt.puts {
+		noslash := key.String()[1:]
+		shardDir := bt.ds.getDir(noslash)
+		tempFile := filepath.Join(bt.tempDir, shardDir, noslash+extension)
+		_, finalPath := bt.ds.encode(key)
+		
+		// Use the doWriteOp to handle concurrent operations properly
+		done, err := bt.ds.doWriteOp(&op{
+			typ:  opRename,
+			key:  key,
+			tmp:  tempFile,
+			path: finalPath,
+		})
+		if err != nil {
+			return fmt.Errorf("failed to rename temp file: %w", err)
+		}
+		if !done {
+			// Another operation succeeded, remove our temp file
+			os.Remove(tempFile)
+		}
+	}
+
+	// Handle deletes
 	for k := range bt.deletes {
 		if err := bt.ds.Delete(ctx, k); err != nil {
 			return err
+		}
+	}
+
+	// Sync directories if needed
+	if bt.ds.sync {
+		for dir := range dirsToSync {
+			if err := syncDir(dir); err != nil {
+				return fmt.Errorf("failed to sync directory: %w", err)
+			}
+		}
+		// Sync root directory
+		if err := syncDir(bt.ds.path); err != nil {
+			return fmt.Errorf("failed to sync root directory: %w", err)
 		}
 	}
 
