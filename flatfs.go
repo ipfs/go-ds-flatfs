@@ -100,6 +100,7 @@ var _ datastore.PersistentDatastore = (*Datastore)(nil)
 var _ datastore.Batching = (*Datastore)(nil)
 var _ datastore.Batch = (*flatfsBatch)(nil)
 var _ DiscardableBatch = (*flatfsBatch)(nil)
+var _ BatchReader = (*flatfsBatch)(nil)
 
 var (
 	ErrDatastoreExists       = errors.New("datastore already exists")
@@ -533,7 +534,6 @@ func (fs *Datastore) doPut(key datastore.Key, val []byte) error {
 	}
 	return nil
 }
-
 
 func (fs *Datastore) Get(ctx context.Context, key datastore.Key) (value []byte, err error) {
 	// Can't exist in datastore.
@@ -1093,13 +1093,20 @@ type DiscardableBatch interface {
 	Discard(ctx context.Context) error
 }
 
+// BatchReader is an optional interface for batches that support read operations
+type BatchReader interface {
+	datastore.Batch
+	datastore.Read
+}
+
 type flatfsBatch struct {
+	mu      sync.Mutex
 	puts    []datastore.Key
 	deletes map[datastore.Key]struct{}
 
-	ds       *Datastore
-	tempDir  string
-	tempFiles []string // track temp files for cleanup
+	ds        *Datastore
+	tempDir   string
+	tempFiles []string // track temp file names (without path) for cleanup
 }
 
 func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
@@ -1122,73 +1129,169 @@ func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) e
 	if !keyIsValid(key) {
 		return fmt.Errorf("when putting '%q': %v", key, ErrInvalidKey)
 	}
-	
-	// Write to temp file immediately instead of keeping in memory
-	noslash := key.String()[1:]
-	shardDir := bt.ds.getDir(noslash)
-	tempShardDir := filepath.Join(bt.tempDir, shardDir)
-	
-	// Create shard directory in temp if it doesn't exist
-	if err := os.MkdirAll(tempShardDir, 0755); err != nil {
-		return fmt.Errorf("failed to create temp shard directory: %w", err)
+
+	bt.mu.Lock()
+	defer bt.mu.Unlock()
+
+	// Check if batch temp directory exists, recreate if needed (for reuse after commit/discard)
+	if _, err := os.Stat(bt.tempDir); os.IsNotExist(err) {
+		if err := os.Mkdir(bt.tempDir, 0755); err != nil {
+			return fmt.Errorf("failed to recreate batch temp directory: %w", err)
+		}
 	}
-	
-	// Write to temp file
-	tempFile := filepath.Join(tempShardDir, noslash+extension)
+
+	// Write to temp file directly in batch dir (no sharding)
+	noslash := key.String()[1:]
+	fileName := noslash + extension
+	tempFile := filepath.Join(bt.tempDir, fileName)
 	file, err := os.Create(tempFile)
 	if err != nil {
 		return fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer file.Close()
-	
+
 	if _, err := file.Write(val); err != nil {
 		os.Remove(tempFile)
 		return fmt.Errorf("failed to write to temp file: %w", err)
 	}
-	
+
 	if bt.ds.sync {
 		if err := syncFile(file); err != nil {
 			os.Remove(tempFile)
 			return fmt.Errorf("failed to sync temp file: %w", err)
 		}
 	}
-	
+
 	if err := file.Close(); err != nil {
 		os.Remove(tempFile)
 		return fmt.Errorf("failed to close temp file: %w", err)
 	}
-	
-	// Track the file and key
-	bt.tempFiles = append(bt.tempFiles, tempFile)
+
+	// Track the file name (not full path) and key
+	bt.tempFiles = append(bt.tempFiles, fileName)
 	bt.puts = append(bt.puts, key)
 	return nil
 }
 
 func (bt *flatfsBatch) Delete(ctx context.Context, key datastore.Key) error {
+	bt.mu.Lock()
+	defer bt.mu.Unlock()
+
 	if keyIsValid(key) {
 		bt.deletes[key] = struct{}{}
 	} // otherwise, delete is a no-op anyways.
 	return nil
 }
 
+func (bt *flatfsBatch) Get(ctx context.Context, key datastore.Key) ([]byte, error) {
+	bt.mu.Lock()
+	// Check if key is marked for deletion
+	if _, deleted := bt.deletes[key]; deleted {
+		bt.mu.Unlock()
+		return nil, datastore.ErrNotFound
+	}
+	bt.mu.Unlock()
+
+	// Check if key exists in temp directory (no sharding)
+	noslash := key.String()[1:]
+	tempFile := filepath.Join(bt.tempDir, noslash+extension)
+
+	data, err := readFile(tempFile)
+	if err == nil {
+		return data, nil
+	}
+
+	// If not in temp, check main datastore
+	if !os.IsNotExist(err) {
+		return nil, err
+	}
+
+	return bt.ds.Get(ctx, key)
+}
+
+func (bt *flatfsBatch) Has(ctx context.Context, key datastore.Key) (bool, error) {
+	bt.mu.Lock()
+	// Check if key is marked for deletion
+	if _, deleted := bt.deletes[key]; deleted {
+		bt.mu.Unlock()
+		return false, nil
+	}
+	bt.mu.Unlock()
+
+	// Check if key exists in temp directory (no sharding)
+	noslash := key.String()[1:]
+	tempFile := filepath.Join(bt.tempDir, noslash+extension)
+
+	if _, err := os.Stat(tempFile); err == nil {
+		return true, nil
+	} else if !os.IsNotExist(err) {
+		return false, err
+	}
+
+	// If not in temp, check main datastore
+	return bt.ds.Has(ctx, key)
+}
+
+func (bt *flatfsBatch) GetSize(ctx context.Context, key datastore.Key) (int, error) {
+	bt.mu.Lock()
+	// Check if key is marked for deletion
+	if _, deleted := bt.deletes[key]; deleted {
+		bt.mu.Unlock()
+		return -1, datastore.ErrNotFound
+	}
+	bt.mu.Unlock()
+
+	// Check if key exists in temp directory (no sharding)
+	noslash := key.String()[1:]
+	tempFile := filepath.Join(bt.tempDir, noslash+extension)
+
+	if stat, err := os.Stat(tempFile); err == nil {
+		return int(stat.Size()), nil
+	} else if !os.IsNotExist(err) {
+		return -1, err
+	}
+
+	// If not in temp, check main datastore
+	return bt.ds.GetSize(ctx, key)
+}
+
+func (bt *flatfsBatch) Query(ctx context.Context, q query.Query) (query.Results, error) {
+	// For simplicity, batch queries just delegate to the main datastore
+	// A full implementation would merge results from temp and main datastore
+	return bt.ds.Query(ctx, q)
+}
+
 // Discard discards the batch operations without committing
 func (bt *flatfsBatch) Discard(ctx context.Context) error {
-	// Simply remove the temp directory with all its contents
-	return os.RemoveAll(bt.tempDir)
+	bt.mu.Lock()
+	defer bt.mu.Unlock()
+
+	// Remove all temp files and the batch directory
+	for _, fileName := range bt.tempFiles {
+		os.Remove(filepath.Join(bt.tempDir, fileName))
+	}
+	// Remove the batch temp directory and all subdirectories
+	os.RemoveAll(bt.tempDir)
+
+	// Reset state so batch can be reused
+	bt.puts = bt.puts[:0]
+	bt.tempFiles = bt.tempFiles[:0]
+	bt.deletes = make(map[datastore.Key]struct{})
+	return nil
 }
 
 func (bt *flatfsBatch) Commit(ctx context.Context) error {
+	bt.mu.Lock()
+	defer bt.mu.Unlock()
+
 	bt.ds.shutdownLock.RLock()
 	defer bt.ds.shutdownLock.RUnlock()
 	if bt.ds.shutdown {
 		return ErrClosed
 	}
 
-	// Clean up temp directory on exit
-	defer os.RemoveAll(bt.tempDir)
-
 	dirsToSync := make(map[string]struct{})
-	
+
 	// First, ensure all destination directories exist
 	for _, key := range bt.puts {
 		dir, _ := bt.ds.encode(key)
@@ -1199,12 +1302,11 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 	}
 
 	// Move all temp files to their final destinations
-	for _, key := range bt.puts {
-		noslash := key.String()[1:]
-		shardDir := bt.ds.getDir(noslash)
-		tempFile := filepath.Join(bt.tempDir, shardDir, noslash+extension)
+	for i, key := range bt.puts {
+		fileName := bt.tempFiles[i]
+		tempFile := filepath.Join(bt.tempDir, fileName)
 		_, finalPath := bt.ds.encode(key)
-		
+
 		// Use the doWriteOp to handle concurrent operations properly
 		done, err := bt.ds.doWriteOp(&op{
 			typ:  opRename,
@@ -1213,11 +1315,14 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 			path: finalPath,
 		})
 		if err != nil {
+			// Clean up remaining temp files on error
+			for j := i; j < len(bt.tempFiles); j++ {
+				os.Remove(filepath.Join(bt.tempDir, bt.tempFiles[j]))
+			}
 			return fmt.Errorf("failed to rename temp file: %w", err)
 		}
 		if !done {
-			// Another operation succeeded, remove our temp file
-			os.Remove(tempFile)
+			// Another operation succeeded, temp file already removed by doWriteOp
 		}
 	}
 
@@ -1240,6 +1345,14 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 			return fmt.Errorf("failed to sync root directory: %w", err)
 		}
 	}
+
+	// Reset state after successful commit so batch can be reused
+	bt.puts = bt.puts[:0]
+	bt.tempFiles = bt.tempFiles[:0]
+	bt.deletes = make(map[datastore.Key]struct{})
+
+	// Clean up the batch temp directory after successful commit
+	os.RemoveAll(bt.tempDir)
 
 	return nil
 }
