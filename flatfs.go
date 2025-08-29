@@ -1005,10 +1005,6 @@ func (fs *Datastore) tempFile() (*os.File, error) {
 	return file, err
 }
 
-func (fs *Datastore) tempFileOnce() (*os.File, error) {
-	return tempFileOnce(fs.tempPath, "temp-")
-}
-
 // only call this on directories.
 func (fs *Datastore) walk(ctx context.Context, q query.Query, path string, output chan<- query.Result) error {
 	dir, err := os.Open(path)
@@ -1308,7 +1304,7 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 		_, finalPath := bt.ds.encode(key)
 
 		// Use the doWriteOp to handle concurrent operations properly
-		done, err := bt.ds.doWriteOp(&op{
+		_, err := bt.ds.doWriteOp(&op{
 			typ:  opRename,
 			key:  key,
 			tmp:  tempFile,
@@ -1321,9 +1317,8 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 			}
 			return fmt.Errorf("failed to rename temp file: %w", err)
 		}
-		if !done {
-			// Another operation succeeded, temp file already removed by doWriteOp
-		}
+		// If doWriteOp returns without error, the operation succeeded
+		// (either by us or by a concurrent operation)
 	}
 
 	// Handle deletes
