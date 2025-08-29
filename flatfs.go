@@ -1186,7 +1186,7 @@ func (bt *flatfsBatch) Get(ctx context.Context, key datastore.Key) ([]byte, erro
 		bt.mu.Unlock()
 		return nil, datastore.ErrNotFound
 	}
-	
+
 	// Check if key was added in this batch
 	inBatch := false
 	for _, k := range bt.puts {
@@ -1219,7 +1219,7 @@ func (bt *flatfsBatch) Has(ctx context.Context, key datastore.Key) (bool, error)
 		bt.mu.Unlock()
 		return false, nil
 	}
-	
+
 	// Check if key was added in this batch
 	for _, k := range bt.puts {
 		if k == key {
@@ -1240,7 +1240,7 @@ func (bt *flatfsBatch) GetSize(ctx context.Context, key datastore.Key) (int, err
 		bt.mu.Unlock()
 		return -1, datastore.ErrNotFound
 	}
-	
+
 	// Check if key was added in this batch
 	inBatch := false
 	for _, k := range bt.puts {
@@ -1267,9 +1267,123 @@ func (bt *flatfsBatch) GetSize(ctx context.Context, key datastore.Key) (int, err
 }
 
 func (bt *flatfsBatch) Query(ctx context.Context, q query.Query) (query.Results, error) {
-	// For simplicity, batch queries just delegate to the main datastore
-	// A full implementation would merge results from temp and main datastore
-	return bt.ds.Query(ctx, q)
+	prefix := datastore.NewKey(q.Prefix).String()
+	if prefix != "/" {
+		// This datastore can't include keys with multiple components.
+		// Therefore, it's always correct to return an empty result when
+		// the user requests a filter by prefix.
+		return query.ResultsWithEntries(q, nil), nil
+	}
+
+	// Get results from main datastore
+	mainResults, err := bt.ds.Query(ctx, q)
+	if err != nil {
+		return nil, err
+	}
+
+	// Merge with temp directory results
+	results := query.ResultsWithContext(q, func(qctx context.Context, output chan<- query.Result) {
+		bt.mu.Lock()
+		deletes := make(map[datastore.Key]struct{})
+		for k := range bt.deletes {
+			deletes[k] = struct{}{}
+		}
+		puts := make([]datastore.Key, len(bt.puts))
+		copy(puts, bt.puts)
+		tempDir := bt.tempDir
+		bt.mu.Unlock()
+
+		// Track which keys we've already sent from temp
+		sentKeys := make(map[string]struct{})
+
+		// First, send results from temp directory (puts)
+		for _, key := range puts {
+			// Skip if deleted
+			if _, deleted := deletes[key]; deleted {
+				continue
+			}
+
+			noslash := key.String()[1:]
+			tempFile := filepath.Join(tempDir, noslash+extension)
+
+			var result query.Result
+			result.Key = key.String()
+
+			if !q.KeysOnly {
+				value, err := readFile(tempFile)
+				if err != nil {
+					if !os.IsNotExist(err) {
+						result.Error = err
+					} else {
+						continue // File doesn't exist, skip
+					}
+				} else {
+					result.Value = value
+					result.Size = len(value)
+				}
+			} else if q.ReturnsSizes {
+				stat, err := os.Stat(tempFile)
+				if err != nil {
+					if !os.IsNotExist(err) {
+						result.Error = err
+					} else {
+						continue // File doesn't exist, skip
+					}
+				} else {
+					result.Size = int(stat.Size())
+				}
+			}
+
+			select {
+			case output <- result:
+				sentKeys[key.String()] = struct{}{}
+			case <-qctx.Done():
+				return
+			}
+		}
+
+		// Then, send results from main datastore (excluding deleted and already sent)
+		mainChan := mainResults.Next()
+		for {
+			select {
+			case result, ok := <-mainChan:
+				if !ok {
+					return
+				}
+				if result.Error != nil {
+					select {
+					case output <- result:
+					case <-qctx.Done():
+						return
+					}
+					continue
+				}
+
+				key := datastore.NewKey(result.Key)
+
+				// Skip if deleted
+				if _, deleted := deletes[key]; deleted {
+					continue
+				}
+
+				// Skip if already sent from temp
+				if _, sent := sentKeys[key.String()]; sent {
+					continue
+				}
+
+				select {
+				case output <- result:
+				case <-qctx.Done():
+					return
+				}
+			case <-qctx.Done():
+				return
+			}
+		}
+	})
+
+	// Apply query filters
+	return query.NaiveQueryApply(q, results), nil
 }
 
 // Discard discards the batch operations without committing

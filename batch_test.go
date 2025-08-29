@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/ipfs/go-datastore"
+	"github.com/ipfs/go-datastore/query"
 	flatfs "github.com/ipfs/go-ds-flatfs"
 )
 
@@ -329,4 +330,205 @@ func testBatchDiscard(dirFunc mkShardFunc, t *testing.T) {
 	if len(tempBatchDirs) > 0 {
 		t.Errorf("batch temp directories should be cleaned up after discard, found: %v", tempBatchDirs)
 	}
+}
+
+func TestBatchQuery(t *testing.T) {
+	tryAllShardFuncs(t, testBatchQuery)
+}
+
+func testBatchQuery(dirFunc mkShardFunc, t *testing.T) {
+	temp, cleanup := tempdir(t)
+	defer cleanup()
+	defer checkTemp(t, temp)
+
+	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	if err != nil {
+		t.Fatalf("CreateOrOpen fail: %v\n", err)
+	}
+	defer fs.Close()
+
+	ctx := context.Background()
+
+	// Add some data to the main datastore
+	mainKeys := []string{"EXISTING1", "EXISTING2", "EXISTING3"}
+	for _, k := range mainKeys {
+		err := fs.Put(ctx, datastore.NewKey(k), []byte("main:"+k))
+		if err != nil {
+			t.Fatalf("Put fail: %v\n", err)
+		}
+	}
+
+	// Create a batch
+	batch, err := fs.Batch(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Add new keys to batch
+	batchKeys := []string{"BATCH1", "BATCH2"}
+	for _, k := range batchKeys {
+		err := batch.Put(ctx, datastore.NewKey(k), []byte("batch:"+k))
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// Delete one existing key
+	err = batch.Delete(ctx, datastore.NewKey("EXISTING2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Update an existing key
+	err = batch.Put(ctx, datastore.NewKey("EXISTING3"), []byte("updated:EXISTING3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Query the batch - should see batch changes
+	batchReader, ok := batch.(flatfs.BatchReader)
+	if !ok {
+		t.Fatal("batch should implement BatchReader")
+	}
+
+	q := query.Query{}
+	results, err := batchReader.Query(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries := collectQueryResults(t, results)
+
+	// Should have:
+	// - /EXISTING1 (from main)
+	// - /EXISTING3 (updated in batch)
+	// - /BATCH1, /BATCH2 (new in batch)
+	// Should NOT have:
+	// - /EXISTING2 (deleted in batch)
+
+	expectedKeys := map[string]string{
+		"/EXISTING1": "main:EXISTING1",
+		"/EXISTING3": "updated:EXISTING3",
+		"/BATCH1":    "batch:BATCH1",
+		"/BATCH2":    "batch:BATCH2",
+	}
+
+	if len(entries) != len(expectedKeys) {
+		t.Fatalf("expected %d entries, got %d", len(expectedKeys), len(entries))
+	}
+
+	for _, entry := range entries {
+		expected, ok := expectedKeys[entry.Key]
+		if !ok {
+			t.Errorf("unexpected key: %s", entry.Key)
+			continue
+		}
+		if string(entry.Value) != expected {
+			t.Errorf("value mismatch for key %s: expected %s, got %s", entry.Key, expected, string(entry.Value))
+		}
+		delete(expectedKeys, entry.Key)
+	}
+
+	if len(expectedKeys) > 0 {
+		t.Errorf("missing keys in query results: %v", expectedKeys)
+	}
+
+	// Test KeysOnly query
+	q = query.Query{KeysOnly: true}
+	results, err = batchReader.Query(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries = collectQueryResults(t, results)
+	if len(entries) != 4 {
+		t.Errorf("expected 4 keys, got %d", len(entries))
+	}
+	for _, entry := range entries {
+		if entry.Value != nil {
+			t.Error("KeysOnly query should not return values")
+		}
+	}
+
+	// Test ReturnsSizes query
+	q = query.Query{KeysOnly: true, ReturnsSizes: true}
+	results, err = batchReader.Query(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries = collectQueryResults(t, results)
+	if len(entries) != 4 {
+		t.Errorf("expected 4 keys, got %d", len(entries))
+	}
+	for _, entry := range entries {
+		if entry.Size <= 0 {
+			t.Error("ReturnsSizes query should return sizes")
+		}
+		if entry.Value != nil {
+			t.Error("KeysOnly query should not return values")
+		}
+	}
+
+	// Commit the batch
+	err = batch.Commit(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Query main datastore - should see committed changes
+	q = query.Query{}
+	results, err = fs.Query(ctx, q)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	entries = collectQueryResults(t, results)
+	if len(entries) != 4 {
+		t.Errorf("expected 4 entries after commit, got %d", len(entries))
+	}
+
+	// Verify committed data
+	for _, entry := range entries {
+		switch entry.Key {
+		case "/EXISTING1":
+			if string(entry.Value) != "main:EXISTING1" {
+				t.Errorf("expected main:EXISTING1, got %s", string(entry.Value))
+			}
+		case "/EXISTING3":
+			if string(entry.Value) != "updated:EXISTING3" {
+				t.Errorf("expected updated:EXISTING3, got %s", string(entry.Value))
+			}
+		case "/BATCH1":
+			if string(entry.Value) != "batch:BATCH1" {
+				t.Errorf("expected batch:BATCH1, got %s", string(entry.Value))
+			}
+		case "/BATCH2":
+			if string(entry.Value) != "batch:BATCH2" {
+				t.Errorf("expected batch:BATCH2, got %s", string(entry.Value))
+			}
+		default:
+			t.Errorf("unexpected key after commit: %s", entry.Key)
+		}
+	}
+
+	// Verify /EXISTING2 was deleted
+	has, err := fs.Has(ctx, datastore.NewKey("EXISTING2"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if has {
+		t.Error("/EXISTING2 should be deleted")
+	}
+}
+
+func collectQueryResults(t *testing.T, results query.Results) []query.Entry {
+	var entries []query.Entry
+	for result := range results.Next() {
+		if result.Error != nil {
+			t.Fatalf("query result error: %v", result.Error)
+		}
+		entries = append(entries, result.Entry)
+	}
+	return entries
 }
