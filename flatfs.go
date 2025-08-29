@@ -1186,22 +1186,29 @@ func (bt *flatfsBatch) Get(ctx context.Context, key datastore.Key) ([]byte, erro
 		bt.mu.Unlock()
 		return nil, datastore.ErrNotFound
 	}
+	
+	// Check if key was added in this batch
+	inBatch := false
+	for _, k := range bt.puts {
+		if k == key {
+			inBatch = true
+			break
+		}
+	}
 	bt.mu.Unlock()
 
-	// Check if key exists in temp directory (no sharding)
-	noslash := key.String()[1:]
-	tempFile := filepath.Join(bt.tempDir, noslash+extension)
-
-	data, err := readFile(tempFile)
-	if err == nil {
+	// If in batch, read from temp directory
+	if inBatch {
+		noslash := key.String()[1:]
+		tempFile := filepath.Join(bt.tempDir, noslash+extension)
+		data, err := readFile(tempFile)
+		if err != nil {
+			return nil, err
+		}
 		return data, nil
 	}
 
-	// If not in temp, check main datastore
-	if !os.IsNotExist(err) {
-		return nil, err
-	}
-
+	// If not in batch, check main datastore
 	return bt.ds.Get(ctx, key)
 }
 
@@ -1212,19 +1219,17 @@ func (bt *flatfsBatch) Has(ctx context.Context, key datastore.Key) (bool, error)
 		bt.mu.Unlock()
 		return false, nil
 	}
+	
+	// Check if key was added in this batch
+	for _, k := range bt.puts {
+		if k == key {
+			bt.mu.Unlock()
+			return true, nil
+		}
+	}
 	bt.mu.Unlock()
 
-	// Check if key exists in temp directory (no sharding)
-	noslash := key.String()[1:]
-	tempFile := filepath.Join(bt.tempDir, noslash+extension)
-
-	if _, err := os.Stat(tempFile); err == nil {
-		return true, nil
-	} else if !os.IsNotExist(err) {
-		return false, err
-	}
-
-	// If not in temp, check main datastore
+	// If not in batch, check main datastore
 	return bt.ds.Has(ctx, key)
 }
 
@@ -1235,19 +1240,29 @@ func (bt *flatfsBatch) GetSize(ctx context.Context, key datastore.Key) (int, err
 		bt.mu.Unlock()
 		return -1, datastore.ErrNotFound
 	}
+	
+	// Check if key was added in this batch
+	inBatch := false
+	for _, k := range bt.puts {
+		if k == key {
+			inBatch = true
+			break
+		}
+	}
 	bt.mu.Unlock()
 
-	// Check if key exists in temp directory (no sharding)
-	noslash := key.String()[1:]
-	tempFile := filepath.Join(bt.tempDir, noslash+extension)
-
-	if stat, err := os.Stat(tempFile); err == nil {
+	// If in batch, get size from temp directory
+	if inBatch {
+		noslash := key.String()[1:]
+		tempFile := filepath.Join(bt.tempDir, noslash+extension)
+		stat, err := os.Stat(tempFile)
+		if err != nil {
+			return -1, err
+		}
 		return int(stat.Size()), nil
-	} else if !os.IsNotExist(err) {
-		return -1, err
 	}
 
-	// If not in temp, check main datastore
+	// If not in batch, check main datastore
 	return bt.ds.GetSize(ctx, key)
 }
 
