@@ -8,10 +8,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"maps"
 	"math"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -246,7 +249,7 @@ func Create(path string, fun *ShardIdV1) error {
 
 func Open(path string, syncFiles bool) (*Datastore, error) {
 	_, err := os.Stat(path)
-	if os.IsNotExist(err) {
+	if errors.Is(err, fs.ErrNotExist) {
 		return nil, ErrDatastoreDoesNotExist
 	} else if err != nil {
 		return nil, err
@@ -254,7 +257,7 @@ func Open(path string, syncFiles bool) (*Datastore, error) {
 
 	tempPath := filepath.Join(path, ".temp")
 	err = os.RemoveAll(tempPath)
-	if err != nil && !os.IsNotExist(err) {
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("failed to remove temporary directory: %v", err)
 	}
 
@@ -1100,9 +1103,13 @@ type flatfsBatch struct {
 	puts    []datastore.Key
 	deletes map[datastore.Key]struct{}
 
-	ds        *Datastore
-	tempDir   string
-	tempFiles []string // track temp file names (without path) for cleanup
+	ds      *Datastore
+	tempDir string
+
+	// Async write tracking
+	asyncWrites     sync.WaitGroup
+	asyncMu         sync.Mutex
+	asyncFirstError error
 }
 
 func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
@@ -1113,65 +1120,110 @@ func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
 	}
 
 	return &flatfsBatch{
-		puts:      make([]datastore.Key, 0),
-		deletes:   make(map[datastore.Key]struct{}),
-		ds:        fs,
-		tempDir:   tempDir,
-		tempFiles: make([]string, 0),
+		puts:    make([]datastore.Key, 0),
+		deletes: make(map[datastore.Key]struct{}),
+		ds:      fs,
+		tempDir: tempDir,
 	}, nil
 }
 
+// Put writes val for key to a temporary file asynchronously and returns immediately.
+// The caller must not modify or reuse val
 func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) error {
 	if !keyIsValid(key) {
 		return fmt.Errorf("when putting '%q': %v", key, ErrInvalidKey)
 	}
 
-	bt.mu.Lock()
-	defer bt.mu.Unlock()
-
-	// Check if batch temp directory exists, recreate if needed (for reuse after commit/discard)
-	if _, err := os.Stat(bt.tempDir); os.IsNotExist(err) {
-		if err := os.Mkdir(bt.tempDir, 0755); err != nil {
-			return fmt.Errorf("failed to recreate batch temp directory: %w", err)
-		}
+	if err := bt.getAsyncError(); err != nil {
+		// If there was an error from a previous async write, return it fast
+		// This may be useful if, for example, we are out of disk space.
+		return err
 	}
 
-	// Write to temp file directly in batch dir (no sharding)
+	bt.mu.Lock()
 	noslash := key.String()[1:]
 	fileName := noslash + extension
 	tempFile := filepath.Join(bt.tempDir, fileName)
-	file, err := os.Create(tempFile)
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	defer file.Close()
 
-	if _, err := file.Write(val); err != nil {
-		os.Remove(tempFile)
-		return fmt.Errorf("failed to write to temp file: %w", err)
-	}
-
-	if bt.ds.sync {
-		if err := syncFile(file); err != nil {
-			os.Remove(tempFile)
-			return fmt.Errorf("failed to sync temp file: %w", err)
-		}
-	}
-
-	if err := file.Close(); err != nil {
-		os.Remove(tempFile)
-		return fmt.Errorf("failed to close temp file: %w", err)
-	}
-
-	// Track the file name (not full path) and key
-	bt.tempFiles = append(bt.tempFiles, fileName)
+	// Track this key immediately
 	bt.puts = append(bt.puts, key)
+
+	// Increment wait group for async write
+	bt.asyncWrites.Add(1)
+	bt.mu.Unlock()
+
+	// Write to temp file asynchronously in a goroutine
+	go func(val []byte) {
+		defer bt.asyncWrites.Done()
+
+		// Ensure temp directory exists (recreate if batch was reused after commit)
+		tempDirPath := filepath.Dir(tempFile)
+		if _, err := os.Stat(tempDirPath); errors.Is(err, fs.ErrNotExist) {
+			if err := os.Mkdir(tempDirPath, 0755); err != nil && !os.IsExist(err) {
+				bt.setAsyncError(fmt.Errorf("failed to recreate temp directory: %w", err))
+				return
+			}
+		} else if err != nil {
+			bt.setAsyncError(fmt.Errorf("failed to stat temp directory: %w", err))
+			return
+		}
+
+		file, err := os.Create(tempFile)
+		if err != nil {
+			bt.setAsyncError(fmt.Errorf("failed to create temp file: %w", err))
+			return
+		}
+		defer file.Close()
+
+		if _, err := file.Write(val); err != nil {
+			os.Remove(tempFile)
+			bt.setAsyncError(fmt.Errorf("failed to write to temp file: %w", err))
+			return
+		}
+
+		if bt.ds.sync {
+			if err := syncFile(file); err != nil {
+				os.Remove(tempFile)
+				bt.setAsyncError(fmt.Errorf("failed to sync temp file: %w", err))
+				return
+			}
+		}
+
+		if err := file.Close(); err != nil {
+			os.Remove(tempFile)
+			bt.setAsyncError(fmt.Errorf("failed to close temp file: %w", err))
+			return
+		}
+	}(val)
+
 	return nil
+}
+
+// setAsyncError save the first error from an async write operation if it is not already set.
+func (bt *flatfsBatch) setAsyncError(err error) {
+	bt.asyncMu.Lock()
+	defer bt.asyncMu.Unlock()
+	if bt.asyncFirstError == nil {
+		bt.asyncFirstError = err
+	}
+}
+
+// getAsyncError returns the first error from an async write operation
+func (bt *flatfsBatch) getAsyncError() error {
+	bt.asyncMu.Lock()
+	defer bt.asyncMu.Unlock()
+
+	err := bt.asyncFirstError
+	return err
 }
 
 func (bt *flatfsBatch) Delete(ctx context.Context, key datastore.Key) error {
 	bt.mu.Lock()
 	defer bt.mu.Unlock()
+
+	if err := bt.getAsyncError(); err != nil {
+		return err
+	}
 
 	if keyIsValid(key) {
 		bt.deletes[key] = struct{}{}
@@ -1180,6 +1232,11 @@ func (bt *flatfsBatch) Delete(ctx context.Context, key datastore.Key) error {
 }
 
 func (bt *flatfsBatch) Get(ctx context.Context, key datastore.Key) ([]byte, error) {
+	// Wait for all async writes to complete before reading
+	bt.asyncWrites.Wait()
+	if err := bt.getAsyncError(); err != nil {
+		return nil, err
+	}
 	bt.mu.Lock()
 	// Check if key is marked for deletion
 	if _, deleted := bt.deletes[key]; deleted {
@@ -1188,13 +1245,7 @@ func (bt *flatfsBatch) Get(ctx context.Context, key datastore.Key) ([]byte, erro
 	}
 
 	// Check if key was added in this batch
-	inBatch := false
-	for _, k := range bt.puts {
-		if k == key {
-			inBatch = true
-			break
-		}
-	}
+	inBatch := slices.Contains(bt.puts, key)
 	bt.mu.Unlock()
 
 	// If in batch, read from temp directory
@@ -1213,6 +1264,12 @@ func (bt *flatfsBatch) Get(ctx context.Context, key datastore.Key) ([]byte, erro
 }
 
 func (bt *flatfsBatch) Has(ctx context.Context, key datastore.Key) (bool, error) {
+	// Wait for all async writes to complete before checking
+	bt.asyncWrites.Wait()
+	if err := bt.getAsyncError(); err != nil {
+		return false, err
+	}
+
 	bt.mu.Lock()
 	// Check if key is marked for deletion
 	if _, deleted := bt.deletes[key]; deleted {
@@ -1221,19 +1278,24 @@ func (bt *flatfsBatch) Has(ctx context.Context, key datastore.Key) (bool, error)
 	}
 
 	// Check if key was added in this batch
-	for _, k := range bt.puts {
-		if k == key {
-			bt.mu.Unlock()
-			return true, nil
-		}
-	}
+	inBatch := slices.Contains(bt.puts, key)
 	bt.mu.Unlock()
+
+	if inBatch {
+		return true, nil
+	}
 
 	// If not in batch, check main datastore
 	return bt.ds.Has(ctx, key)
 }
 
 func (bt *flatfsBatch) GetSize(ctx context.Context, key datastore.Key) (int, error) {
+	// Wait for all async writes to complete before checking size
+	bt.asyncWrites.Wait()
+
+	if err := bt.getAsyncError(); err != nil {
+		return 0, err
+	}
 	bt.mu.Lock()
 	// Check if key is marked for deletion
 	if _, deleted := bt.deletes[key]; deleted {
@@ -1242,13 +1304,7 @@ func (bt *flatfsBatch) GetSize(ctx context.Context, key datastore.Key) (int, err
 	}
 
 	// Check if key was added in this batch
-	inBatch := false
-	for _, k := range bt.puts {
-		if k == key {
-			inBatch = true
-			break
-		}
-	}
+	inBatch := slices.Contains(bt.puts, key)
 	bt.mu.Unlock()
 
 	// If in batch, get size from temp directory
@@ -1267,6 +1323,11 @@ func (bt *flatfsBatch) GetSize(ctx context.Context, key datastore.Key) (int, err
 }
 
 func (bt *flatfsBatch) Query(ctx context.Context, q query.Query) (query.Results, error) {
+	// Wait for all async writes to complete before querying
+	bt.asyncWrites.Wait()
+	if err := bt.getAsyncError(); err != nil {
+		return nil, err
+	}
 	prefix := datastore.NewKey(q.Prefix).String()
 	if prefix != "/" {
 		// This datastore can't include keys with multiple components.
@@ -1284,22 +1345,16 @@ func (bt *flatfsBatch) Query(ctx context.Context, q query.Query) (query.Results,
 	// Merge with temp directory results
 	results := query.ResultsWithContext(q, func(qctx context.Context, output chan<- query.Result) {
 		bt.mu.Lock()
-		deletes := make(map[datastore.Key]struct{})
-		for k := range bt.deletes {
-			deletes[k] = struct{}{}
-		}
-		puts := make([]datastore.Key, len(bt.puts))
-		copy(puts, bt.puts)
+		// Clone deletes and puts to avoid holding lock during query execution
+		deletedOrSent := maps.Clone(bt.deletes)
+		puts := slices.Clone(bt.puts)
 		tempDir := bt.tempDir
 		bt.mu.Unlock()
-
-		// Track which keys we've already sent from temp
-		sentKeys := make(map[string]struct{})
 
 		// First, send results from temp directory (puts)
 		for _, key := range puts {
 			// Skip if deleted
-			if _, deleted := deletes[key]; deleted {
+			if _, deleted := deletedOrSent[key]; deleted {
 				continue
 			}
 
@@ -1312,7 +1367,7 @@ func (bt *flatfsBatch) Query(ctx context.Context, q query.Query) (query.Results,
 			if !q.KeysOnly {
 				value, err := readFile(tempFile)
 				if err != nil {
-					if !os.IsNotExist(err) {
+					if !errors.Is(err, fs.ErrNotExist) {
 						result.Error = err
 					} else {
 						continue // File doesn't exist, skip
@@ -1324,7 +1379,7 @@ func (bt *flatfsBatch) Query(ctx context.Context, q query.Query) (query.Results,
 			} else if q.ReturnsSizes {
 				stat, err := os.Stat(tempFile)
 				if err != nil {
-					if !os.IsNotExist(err) {
+					if !errors.Is(err, fs.ErrNotExist) {
 						result.Error = err
 					} else {
 						continue // File doesn't exist, skip
@@ -1336,7 +1391,8 @@ func (bt *flatfsBatch) Query(ctx context.Context, q query.Query) (query.Results,
 
 			select {
 			case output <- result:
-				sentKeys[key.String()] = struct{}{}
+				// Mark this key as sent by adding it to deletedOrSent map
+				deletedOrSent[key] = struct{}{}
 			case <-qctx.Done():
 				return
 			}
@@ -1361,13 +1417,8 @@ func (bt *flatfsBatch) Query(ctx context.Context, q query.Query) (query.Results,
 
 				key := datastore.NewKey(result.Key)
 
-				// Skip if deleted
-				if _, deleted := deletes[key]; deleted {
-					continue
-				}
-
-				// Skip if already sent from temp
-				if _, sent := sentKeys[key.String()]; sent {
+				// Skip if deleted or already sent from temp
+				if _, skip := deletedOrSent[key]; skip {
 					continue
 				}
 
@@ -1388,24 +1439,31 @@ func (bt *flatfsBatch) Query(ctx context.Context, q query.Query) (query.Results,
 
 // Discard discards the batch operations without committing
 func (bt *flatfsBatch) Discard(ctx context.Context) error {
+	// Wait for any pending async writes to complete
+	bt.asyncWrites.Wait()
+
 	bt.mu.Lock()
 	defer bt.mu.Unlock()
 
-	// Remove all temp files and the batch directory
-	for _, fileName := range bt.tempFiles {
-		os.Remove(filepath.Join(bt.tempDir, fileName))
-	}
 	// Remove the batch temp directory and all subdirectories
-	os.RemoveAll(bt.tempDir)
-
-	// Reset state so batch can be reused
-	bt.puts = bt.puts[:0]
-	bt.tempFiles = bt.tempFiles[:0]
+	_ = os.RemoveAll(bt.tempDir)
+	bt.puts = nil
+	bt.asyncFirstError = nil
 	bt.deletes = make(map[datastore.Key]struct{})
+
 	return nil
 }
 
 func (bt *flatfsBatch) Commit(ctx context.Context) error {
+	// Wait for all async write operations to complete
+	bt.asyncWrites.Wait()
+
+	if err := bt.getAsyncError(); err != nil {
+		// If there was an error from a previous async write, return it fast
+		// This may be useful if, for example, we are out of disk space.
+		return err
+	}
+
 	bt.mu.Lock()
 	defer bt.mu.Unlock()
 
@@ -1427,8 +1485,9 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 	}
 
 	// Move all temp files to their final destinations
-	for i, key := range bt.puts {
-		fileName := bt.tempFiles[i]
+	for _, key := range bt.puts {
+		noslash := key.String()[1:]
+		fileName := noslash + extension
 		tempFile := filepath.Join(bt.tempDir, fileName)
 		_, finalPath := bt.ds.encode(key)
 
@@ -1441,9 +1500,7 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 		})
 		if err != nil {
 			// Clean up remaining temp files on error
-			for j := i; j < len(bt.tempFiles); j++ {
-				os.Remove(filepath.Join(bt.tempDir, bt.tempFiles[j]))
-			}
+			_ = os.RemoveAll(bt.tempDir)
 			return fmt.Errorf("failed to rename temp file: %w", err)
 		}
 		// If doWriteOp returns without error, the operation succeeded
@@ -1471,8 +1528,7 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 	}
 
 	// Reset state after successful commit so batch can be reused
-	bt.puts = bt.puts[:0]
-	bt.tempFiles = bt.tempFiles[:0]
+	bt.puts = nil
 	bt.deletes = make(map[datastore.Key]struct{})
 
 	// Clean up the batch temp directory after successful commit

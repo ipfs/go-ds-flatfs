@@ -523,12 +523,10 @@ func testBatchQuery(dirFunc mkShardFunc, t *testing.T) {
 }
 
 func collectQueryResults(t *testing.T, results query.Results) []query.Entry {
-	var entries []query.Entry
-	for result := range results.Next() {
-		if result.Error != nil {
-			t.Fatalf("query result error: %v", result.Error)
-		}
-		entries = append(entries, result.Entry)
+	t.Helper()
+	entries, err := results.Rest()
+	if err != nil {
+		t.Fatalf("query result error: %v", err)
 	}
 	return entries
 }
