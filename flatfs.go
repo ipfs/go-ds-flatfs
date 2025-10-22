@@ -1120,7 +1120,6 @@ func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
 	}
 
 	return &flatfsBatch{
-		puts:    make([]datastore.Key, 0),
 		deletes: make(map[datastore.Key]struct{}),
 		ds:      fs,
 		tempDir: tempDir,
