@@ -191,8 +191,15 @@ func (m *opMap) Begin(name string) *opResult {
 		}
 
 		op := opIface.(*opResult)
-		// someone else doing ops with this key, wait for
-		// the result
+		// someone else doing ops with this key, wait for the
+		// result Note: we are using `op.mu` as a syncing
+		// primitive to make several threads WAIT. The first
+		// operation will grab the write-lock. Everyone else
+		// tries to grab a read-lock as a way of waiting for
+		// the operation to be finished by the thead that
+		// grabbed the write-lock. The Read-lock does not need
+		// to be unlocked, as the operation is never used or
+		// re-used for anything else from that point.
 		op.mu.RLock()
 		if op.success {
 			return nil
