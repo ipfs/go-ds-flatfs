@@ -1144,6 +1144,13 @@ func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) e
 		return err
 	}
 
+	// Acquire semaphore slot before starting another async put.
+	select {
+	case bt.asyncPutGate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+
 	bt.mu.Lock()
 	noslash := key.String()[1:]
 	fileName := noslash + extension
