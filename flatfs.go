@@ -1377,6 +1377,16 @@ func (bt *flatfsBatch) GetSize(ctx context.Context, key datastore.Key) (int, err
 	return bt.ds.GetSize(ctx, key)
 }
 
+// Query returns all entries from both the batch and underlying datastore,
+// properly merging results to reflect the batch's uncommitted state.
+//
+// Merge logic:
+// - Keys written via Put appear in results (even if not committed)
+// - Keys marked for Delete do not appear in results
+// - Keys Put multiple times appear only once (last write wins)
+// - Main datastore results are excluded if overwritten or deleted in batch
+//
+// The implementation waits for all async writes to complete before querying.
 func (bt *flatfsBatch) Query(ctx context.Context, q query.Query) (query.Results, error) {
 	// Wait for all async writes to complete before querying
 	bt.asyncWrites.Wait()
