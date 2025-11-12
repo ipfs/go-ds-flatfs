@@ -1110,6 +1110,7 @@ type flatfsBatch struct {
 	asyncWrites     sync.WaitGroup
 	asyncMu         sync.Mutex
 	asyncFirstError error
+	asyncPutGate    chan struct{}
 }
 
 func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
