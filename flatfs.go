@@ -1246,7 +1246,10 @@ func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) e
 	return nil
 }
 
-// setAsyncError save the first error from an async write operation if it is not already set.
+// setAsyncError saves the first error from an async write operation.
+// Only the first error is captured; subsequent errors are ignored.
+// This provides fail-fast behavior: once any write fails, subsequent
+// operations return that error immediately.
 func (bt *flatfsBatch) setAsyncError(err error) {
 	bt.asyncMu.Lock()
 	defer bt.asyncMu.Unlock()
