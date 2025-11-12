@@ -1519,6 +1519,22 @@ func (bt *flatfsBatch) Discard(ctx context.Context) error {
 	return nil
 }
 
+// Commit atomically applies all batch operations to the datastore.
+//
+// Atomicity guarantee: All Put operations are moved to their final destinations
+// only after being written to temp files. If the process crashes before Commit
+// completes, the temp directory is cleaned on restart and no partial data remains.
+//
+// Order of operations:
+// 1. Wait for all async Put goroutines to complete
+// 2. Check for any async write errors (fail-fast)
+// 3. Create all destination shard directories
+// 4. Atomically rename temp files to final sharded paths
+// 5. Apply all Delete operations
+// 6. Sync directories (if sync is enabled)
+//
+// Concurrency: Uses doWriteOp to handle concurrent commits gracefully.
+// If another goroutine commits the same key, the operation succeeds.
 func (bt *flatfsBatch) Commit(ctx context.Context) error {
 	// Wait for all async write operations to complete
 	bt.asyncWrites.Wait()
