@@ -1101,6 +1101,27 @@ type BatchReader interface {
 // TODO: move this to be with other consts above
 const maxConcurrentPuts = 16
 
+// flatfsBatch implements atomic batch operations using a temporary directory.
+//
+// Design principles:
+// - All Put operations write to a temp directory (no sharding)
+// - Writes are done asynchronously in goroutines for performance
+// - Commit atomically renames all files to their sharded destinations
+// - On crash/discard, temp directory is cleaned (no partial writes)
+//
+// Concurrency: Safe for concurrent calls to Put/Delete/Get/Has/GetSize/Query.
+// Not safe to call Commit or Discard concurrently with other operations.
+//
+// Transaction semantics: Read operations (Get/Has/GetSize/Query) see
+// uncommitted writes from the same batch, following standard database
+// transaction isolation.
+//
+// Performance characteristics:
+// - Put: O(1) with async I/O, returns immediately
+// - Get/Has/GetSize: O(n) where n = number of Put operations in batch
+// - Commit: O(n) file renames
+//
+// IMPORTANT: Batch instances should not be reused after Commit or Discard.
 type flatfsBatch struct {
 	mu      sync.Mutex
 	puts    []datastore.Key
