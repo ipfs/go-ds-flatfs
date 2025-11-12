@@ -1098,6 +1098,9 @@ type BatchReader interface {
 	datastore.Read
 }
 
+// TODO: move this to be with other consts above
+const maxConcurrentPuts = 16
+
 type flatfsBatch struct {
 	mu      sync.Mutex
 	puts    []datastore.Key
