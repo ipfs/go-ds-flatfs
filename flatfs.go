@@ -1139,6 +1139,8 @@ type flatfsBatch struct {
 
 func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
 	// Create a unique temp directory for this batch
+  // Note: Temp files are not sharded (flat structure) for simplicity and speed.
+  // Files are only sharded when renamed to their final destination on Commit.
 	tempDir := filepath.Join(fs.tempPath, fmt.Sprintf("batch-%d-%d", time.Now().UnixNano(), rand.Int63()))
 	if err := os.Mkdir(tempDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create batch temp directory: %w", err)
