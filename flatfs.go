@@ -1278,6 +1278,14 @@ func (bt *flatfsBatch) Delete(ctx context.Context, key datastore.Key) error {
 	return nil
 }
 
+// Get retrieves a value from the batch or underlying datastore.
+//
+// Transaction semantics: Returns uncommitted data written to this batch via Put,
+// even before Commit. This allows building IPLD structures that reference blocks
+// added earlier in the same batch.
+//
+// Performance: O(n) where n is the number of Put operations, as it must scan
+// the puts slice to check if the key exists in the batch.
 func (bt *flatfsBatch) Get(ctx context.Context, key datastore.Key) ([]byte, error) {
 	// Wait for all async writes to complete before reading
 	bt.asyncWrites.Wait()
