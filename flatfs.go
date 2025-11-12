@@ -1165,7 +1165,10 @@ func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) e
 
 	// Write to temp file asynchronously in a goroutine
 	go func(val []byte) {
-		defer bt.asyncWrites.Done()
+		defer func() {
+			bt.asyncWrites.Done()
+			<-bt.asyncPutGate
+		}()
 
 		// Ensure temp directory exists (recreate if batch was reused after commit)
 		tempDirPath := filepath.Dir(tempFile)
