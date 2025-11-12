@@ -1153,7 +1153,19 @@ func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
 }
 
 // Put writes val for key to a temporary file asynchronously and returns immediately.
-// The caller must not modify or reuse val
+//
+// CRITICAL: The caller MUST NOT modify or reuse the val byte slice after calling Put.
+// The buffer is used asynchronously by a background goroutine. Violating this will
+// cause data corruption. This differs from typical Go semantics where buffers can
+// be reused after a function returns.
+//
+// If you need to reuse buffers, copy them before calling Put:
+//   buf := make([]byte, len(data))
+//   copy(buf, data)
+//   batch.Put(ctx, key, buf)
+//
+// Error handling: If an async write fails, the error is captured and returned
+// on the next Put/Delete/Commit or any read operation (fail-fast behavior).
 func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) error {
 	if !keyIsValid(key) {
 		return fmt.Errorf("when putting '%q': %v", key, ErrInvalidKey)
