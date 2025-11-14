@@ -1124,7 +1124,8 @@ const maxConcurrentPuts = 16
 // IMPORTANT: Batch instances should not be reused after Commit or Discard.
 type flatfsBatch struct {
 	mu      sync.Mutex
-	puts    []datastore.Key
+	puts    []datastore.Key            // ordered list for iteration (Commit, Query)
+	putsSet map[datastore.Key]struct{} // O(1) lookup for Get/Has/GetSize
 	deletes map[datastore.Key]struct{}
 
 	ds      *Datastore
