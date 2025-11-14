@@ -34,6 +34,7 @@ const (
 	diskUsageMessageTimeout    = 5 * time.Second
 	diskUsageCheckpointPercent = 1.0
 	diskUsageCheckpointTimeout = 2 * time.Second
+	maxConcurrentPuts          = 16
 )
 
 var (
@@ -1105,9 +1106,6 @@ type BatchReader interface {
 	datastore.Read
 }
 
-// TODO: move this to be with other consts above
-const maxConcurrentPuts = 16
-
 // flatfsBatch implements atomic batch operations using a temporary directory.
 //
 // Design principles:
@@ -1132,7 +1130,7 @@ const maxConcurrentPuts = 16
 type flatfsBatch struct {
 	mu      sync.Mutex
 	puts    []datastore.Key            // ordered list for iteration (Commit, Query)
-	putsSet map[datastore.Key]struct{} // O(1) lookup for Get/Has/GetSize
+	putSet  map[datastore.Key]struct{} // O(1) lookup for Get/Has/GetSize
 	deletes map[datastore.Key]struct{}
 
 	ds      *Datastore
@@ -1147,14 +1145,15 @@ type flatfsBatch struct {
 
 func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
 	// Create a unique temp directory for this batch
-  // Note: Temp files are not sharded (flat structure) for simplicity and speed.
-  // Files are only sharded when renamed to their final destination on Commit.
+	// Note: Temp files are not sharded (flat structure) for simplicity and speed.
+	// Files are only sharded when renamed to their final destination on Commit.
 	tempDir := filepath.Join(fs.tempPath, fmt.Sprintf("batch-%d-%d", time.Now().UnixNano(), rand.Int63()))
 	if err := os.Mkdir(tempDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create batch temp directory: %w", err)
 	}
 
 	return &flatfsBatch{
+		putSet:       make(map[datastore.Key]struct{}),
 		deletes:      make(map[datastore.Key]struct{}),
 		ds:           fs,
 		tempDir:      tempDir,
@@ -1170,9 +1169,10 @@ func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
 // be reused after a function returns.
 //
 // If you need to reuse buffers, copy them before calling Put:
-//   buf := make([]byte, len(data))
-//   copy(buf, data)
-//   batch.Put(ctx, key, buf)
+//
+//	buf := make([]byte, len(data))
+//	copy(buf, data)
+//	batch.Put(ctx, key, buf)
 //
 // Error handling: If an async write fails, the error is captured and returned
 // on the next Put/Delete/Commit or any read operation (fail-fast behavior).
@@ -1201,6 +1201,7 @@ func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) e
 
 	// Track this key immediately
 	bt.puts = append(bt.puts, key)
+	bt.putSet[key] = struct{}{}
 
 	// Increment wait group for async write
 	bt.asyncWrites.Add(1)
@@ -1313,7 +1314,7 @@ func (bt *flatfsBatch) Get(ctx context.Context, key datastore.Key) ([]byte, erro
 	}
 
 	// Check if key was added in this batch
-	inBatch := slices.Contains(bt.puts, key)
+	_, inBatch := bt.putSet[key]
 	bt.mu.Unlock()
 
 	// If in batch, read from temp directory
@@ -1346,7 +1347,7 @@ func (bt *flatfsBatch) Has(ctx context.Context, key datastore.Key) (bool, error)
 	}
 
 	// Check if key was added in this batch
-	inBatch := slices.Contains(bt.puts, key)
+	_, inBatch := bt.putSet[key]
 	bt.mu.Unlock()
 
 	if inBatch {
@@ -1372,7 +1373,7 @@ func (bt *flatfsBatch) GetSize(ctx context.Context, key datastore.Key) (int, err
 	}
 
 	// Check if key was added in this batch
-	inBatch := slices.Contains(bt.puts, key)
+	_, inBatch := bt.putSet[key]
 	bt.mu.Unlock()
 
 	// If in batch, get size from temp directory
@@ -1526,6 +1527,7 @@ func (bt *flatfsBatch) Discard(ctx context.Context) error {
 	// Remove the batch temp directory and all subdirectories
 	_ = os.RemoveAll(bt.tempDir)
 	bt.puts = nil
+	bt.putSet = make(map[datastore.Key]struct{})
 	bt.asyncFirstError = nil
 	bt.deletes = make(map[datastore.Key]struct{})
 
@@ -1623,6 +1625,7 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 
 	// Reset state after successful commit so batch can be reused
 	bt.puts = nil
+	bt.putSet = make(map[datastore.Key]struct{})
 	bt.deletes = make(map[datastore.Key]struct{})
 
 	// Clean up the batch temp directory after successful commit
