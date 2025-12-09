@@ -1205,15 +1205,15 @@ func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) e
 	}
 
 	bt.mu.Lock()
-	
-	// Skip duplicate keys to prevent concurrent goroutines from writing to
-	// the same temp file. Without this check, two Put calls with the same key
+
+	// Skip duplicate keys to prevent concurrent goroutines from writing to the
+	// same temp file. Without this check, two Put calls with the same key
 	// would spawn goroutines that race on os.Create/Write, potentially
 	// corrupting the file contents.
 	if _, exists := bt.putSet[key]; exists {
-	  bt.mu.Unlock()
-	  <-bt.asyncPutGate // Release semaphore slot acquired above
-	  return nil
+		bt.mu.Unlock()
+		<-bt.asyncPutGate // Release semaphore slot acquired above
+		return nil
 	}
 	noslash := key.String()[1:]
 	fileName := noslash + extension
