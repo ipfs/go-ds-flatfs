@@ -34,7 +34,17 @@ const (
 	diskUsageMessageTimeout    = 5 * time.Second
 	diskUsageCheckpointPercent = 1.0
 	diskUsageCheckpointTimeout = 2 * time.Second
-	maxConcurrentPuts          = 16
+
+	// maxConcurrentPuts limits the number of parallel async writes during
+	// batch operations. Each Put spawns a goroutine that writes to a temp
+	// file; this constant bounds how many can run simultaneously.
+	//
+	// The value 16 balances several constraints:
+	//   - macOS default file descriptor limit is only 256, so we stay conservative
+	//   - provides good parallelism for SSDs (common case) without overwhelming HDDs
+	//   - keeps memory overhead bounded (~16-32 MiB with typical 1-2 MiB block sizes)
+	//   - matches typical "conservative concurrent I/O" defaults in other tools
+	maxConcurrentPuts = 16
 )
 
 var (
@@ -1109,10 +1119,10 @@ type BatchReader interface {
 // flatfsBatch implements atomic batch operations using a temporary directory.
 //
 // Design principles:
-// - All Put operations write to a temp directory (no sharding)
-// - Writes are done asynchronously in goroutines for performance
-// - Commit atomically renames all files to their sharded destinations
-// - On crash/discard, temp directory is cleaned (no partial writes)
+//   - All Put operations write to a temp directory (no sharding)
+//   - Writes are done asynchronously in goroutines for performance
+//   - Commit atomically renames all files to their sharded destinations
+//   - On crash/discard, temp directory is cleaned (no partial writes)
 //
 // Concurrency: Safe for concurrent calls to Put/Delete/Get/Has/GetSize/Query.
 // Not safe to call Commit or Discard concurrently with other operations.
@@ -1122,9 +1132,9 @@ type BatchReader interface {
 // transaction isolation.
 //
 // Performance characteristics:
-// - Put: O(1) with async I/O, returns immediately
-// - Get/Has/GetSize: O(n) where n = number of Put operations in batch
-// - Commit: O(n) file renames
+//   - Put: O(1) with async I/O, returns immediately
+//   - Get/Has/GetSize: O(1) lookup via putSet map
+//   - Commit: O(n) file renames, where n = number of Put operations
 //
 // IMPORTANT: Batch instances should not be reused after Commit or Discard.
 type flatfsBatch struct {
@@ -1298,8 +1308,7 @@ func (bt *flatfsBatch) Delete(ctx context.Context, key datastore.Key) error {
 // even before Commit. This allows building IPLD structures that reference blocks
 // added earlier in the same batch.
 //
-// Performance: O(n) where n is the number of Put operations, as it must scan
-// the puts slice to check if the key exists in the batch.
+// Performance: O(1) lookup via putSet map, plus file read if key is in batch.
 func (bt *flatfsBatch) Get(ctx context.Context, key datastore.Key) ([]byte, error) {
 	// Wait for all async writes to complete before reading
 	bt.asyncWrites.Wait()
