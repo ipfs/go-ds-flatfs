@@ -1246,7 +1246,7 @@ func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) e
 			return
 		}
 
-		file, err := os.Create(tempFile)
+		file, err := createFile(tempFile)
 		if err != nil {
 			bt.setAsyncError(fmt.Errorf("failed to create temp file: %w", err))
 			return
