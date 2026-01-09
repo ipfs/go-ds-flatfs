@@ -45,20 +45,6 @@ func checkTemp(t *testing.T, dir string) {
 	}
 }
 
-func tempdir(t testing.TB) (path string, cleanup func()) {
-	path, err := os.MkdirTemp("", "test-datastore-flatfs-")
-	if err != nil {
-		t.Fatalf("cannot create temp directory: %v", err)
-	}
-
-	cleanup = func() {
-		if err := os.RemoveAll(path); err != nil {
-			t.Errorf("tempdir cleanup failed: %v", err)
-		}
-	}
-	return path, cleanup
-}
-
 func tryAllShardFuncs(t *testing.T, testFunc func(mkShardFunc, *testing.T)) {
 	t.Run("prefix", func(t *testing.T) { testFunc(flatfs.Prefix, t) })
 	t.Run("suffix", func(t *testing.T) { testFunc(flatfs.Suffix, t) })
@@ -68,8 +54,7 @@ func tryAllShardFuncs(t *testing.T, testFunc func(mkShardFunc, *testing.T)) {
 type mkShardFunc func(int) *flatfs.ShardIdV1
 
 func testBatch(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -131,8 +116,7 @@ func testBatch(dirFunc mkShardFunc, t *testing.T) {
 func TestBatch(t *testing.T) { tryAllShardFuncs(t, testBatch) }
 
 func testPut(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -155,8 +139,7 @@ func testPut(dirFunc mkShardFunc, t *testing.T) {
 func TestPut(t *testing.T) { tryAllShardFuncs(t, testPut) }
 
 func testGet(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -188,8 +171,7 @@ func testGet(dirFunc mkShardFunc, t *testing.T) {
 func TestGet(t *testing.T) { tryAllShardFuncs(t, testGet) }
 
 func testPutOverwrite(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -224,8 +206,7 @@ func testPutOverwrite(dirFunc mkShardFunc, t *testing.T) {
 func TestPutOverwrite(t *testing.T) { tryAllShardFuncs(t, testPutOverwrite) }
 
 func testGetNotFoundError(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -249,8 +230,7 @@ type params struct {
 }
 
 func testStorage(p *params, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	target := p.dir + string(os.PathSeparator) + p.key + ".data"
@@ -344,8 +324,7 @@ func TestStorage(t *testing.T) {
 }
 
 func testHasNotFound(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -366,8 +345,7 @@ func testHasNotFound(dirFunc mkShardFunc, t *testing.T) {
 func TestHasNotFound(t *testing.T) { tryAllShardFuncs(t, testHasNotFound) }
 
 func testHasFound(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -393,8 +371,7 @@ func testHasFound(dirFunc mkShardFunc, t *testing.T) {
 func TestHasFound(t *testing.T) { tryAllShardFuncs(t, testHasFound) }
 
 func testGetSizeFound(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -412,8 +389,7 @@ func testGetSizeFound(dirFunc mkShardFunc, t *testing.T) {
 func TestGetSizeFound(t *testing.T) { tryAllShardFuncs(t, testGetSizeFound) }
 
 func testGetSizeNotFound(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -439,8 +415,7 @@ func testGetSizeNotFound(dirFunc mkShardFunc, t *testing.T) {
 func TestGetSizeNotFound(t *testing.T) { tryAllShardFuncs(t, testGetSizeNotFound) }
 
 func testDeleteNotFound(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -458,8 +433,7 @@ func testDeleteNotFound(dirFunc mkShardFunc, t *testing.T) {
 func TestDeleteNotFound(t *testing.T) { tryAllShardFuncs(t, testDeleteNotFound) }
 
 func testDeleteFound(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -488,8 +462,7 @@ func testDeleteFound(dirFunc mkShardFunc, t *testing.T) {
 func TestDeleteFound(t *testing.T) { tryAllShardFuncs(t, testDeleteFound) }
 
 func testQuerySimple(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -529,8 +502,7 @@ func testQuerySimple(dirFunc mkShardFunc, t *testing.T) {
 func TestQuerySimple(t *testing.T) { tryAllShardFuncs(t, testQuerySimple) }
 
 func testDiskUsage(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -651,8 +623,7 @@ func TestDiskUsageDoubleCount(t *testing.T) {
 // does not throw any errors and disk usage does not do
 // any double-counting.
 func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -725,8 +696,7 @@ func testDiskUsageDoubleCount(dirFunc mkShardFunc, t *testing.T) {
 }
 
 func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -826,8 +796,7 @@ func testDiskUsageBatch(dirFunc mkShardFunc, t *testing.T) {
 func TestDiskUsageBatch(t *testing.T) { tryAllShardFuncs(t, testDiskUsageBatch) }
 
 func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -911,8 +880,7 @@ func testDiskUsageEstimation(dirFunc mkShardFunc, t *testing.T) {
 func TestDiskUsageEstimation(t *testing.T) { tryAllShardFuncs(t, testDiskUsageEstimation) }
 
 func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -927,8 +895,7 @@ func testBatchPut(dirFunc mkShardFunc, t *testing.T) {
 func TestBatchPut(t *testing.T) { tryAllShardFuncs(t, testBatchPut) }
 
 func testBatchDelete(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -943,8 +910,7 @@ func testBatchDelete(dirFunc mkShardFunc, t *testing.T) {
 func TestBatchDelete(t *testing.T) { tryAllShardFuncs(t, testBatchDelete) }
 
 func testClose(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
@@ -968,8 +934,7 @@ func testClose(dirFunc mkShardFunc, t *testing.T) {
 func TestClose(t *testing.T) { tryAllShardFuncs(t, testClose) }
 
 func TestSHARDINGFile(t *testing.T) {
-	tempdir, cleanup := tempdir(t)
-	defer cleanup()
+	tempdir := t.TempDir()
 
 	fun := flatfs.IPFS_DEF_SHARD
 
@@ -1008,8 +973,7 @@ func TestInvalidPrefix(t *testing.T) {
 }
 
 func TestNonDatastoreDir(t *testing.T) {
-	tempdir, cleanup := tempdir(t)
-	defer cleanup()
+	tempdir := t.TempDir()
 
 	err := os.WriteFile(filepath.Join(tempdir, "afile"), []byte("Some Content"), 0644)
 	if err != nil {
@@ -1023,8 +987,7 @@ func TestNonDatastoreDir(t *testing.T) {
 }
 
 func TestNoCluster(t *testing.T) {
-	tempdir, cleanup := tempdir(t)
-	defer cleanup()
+	tempdir := t.TempDir()
 	defer checkTemp(t, tempdir)
 
 	fs, err := flatfs.CreateOrOpen(tempdir, flatfs.NextToLast(1), false)
@@ -1098,8 +1061,7 @@ func BenchmarkConsecutivePut(b *testing.B) {
 		key := base32.StdEncoding.EncodeToString(blk[:8])
 		keys = append(keys, datastore.NewKey(key))
 	}
-	temp, cleanup := tempdir(b)
-	defer cleanup()
+	temp := b.TempDir()
 
 	fs, err := flatfs.CreateOrOpen(temp, flatfs.Prefix(2), false)
 	if err != nil {
@@ -1130,8 +1092,7 @@ func BenchmarkBatchedPut(b *testing.B) {
 		key := base32.StdEncoding.EncodeToString(blk[:8])
 		keys = append(keys, datastore.NewKey(key))
 	}
-	temp, cleanup := tempdir(b)
-	defer cleanup()
+	temp := b.TempDir()
 
 	fs, err := flatfs.CreateOrOpen(temp, flatfs.Prefix(2), false)
 	if err != nil {
@@ -1162,8 +1123,7 @@ func BenchmarkBatchedPut(b *testing.B) {
 }
 
 func TestQueryLeak(t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 
 	fs, err := flatfs.CreateOrOpen(temp, flatfs.Prefix(2), false)
 	if err != nil {
@@ -1201,8 +1161,7 @@ func TestQueryLeak(t *testing.T) {
 }
 
 func TestSuite(t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
 	fs, err := flatfs.CreateOrOpen(temp, flatfs.Prefix(2), false)

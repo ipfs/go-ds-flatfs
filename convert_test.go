@@ -15,8 +15,7 @@ import (
 )
 
 func TestMove(t *testing.T) {
-	tempdir, cleanup := tempdir(t)
-	defer cleanup()
+	tempdir := t.TempDir()
 
 	v1dir := filepath.Join(tempdir, "v1")
 	createDatastore(t, v1dir, flatfs.Prefix(3))
@@ -60,8 +59,7 @@ func TestMoveRestart(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip()
 	}
-	tempdir, cleanup := tempdir(t)
-	defer cleanup()
+	tempdir := t.TempDir()
 
 	v1dir := filepath.Join(tempdir, "v1")
 	v2dir := filepath.Join(tempdir, "v2")
@@ -133,8 +131,7 @@ func TestMoveRestart(t *testing.T) {
 }
 
 func TestUpgradeDownload(t *testing.T) {
-	tempdir, cleanup := tempdir(t)
-	defer cleanup()
+	tempdir := t.TempDir()
 
 	createDatastore(t, tempdir, flatfs.Prefix(3))
 
@@ -168,8 +165,7 @@ func TestUpgradeDownload(t *testing.T) {
 }
 
 func TestDownloadNonPrefix(t *testing.T) {
-	tempdir, cleanup := tempdir(t)
-	defer cleanup()
+	tempdir := t.TempDir()
 
 	createDatastore(t, tempdir, flatfs.NextToLast(2))
 

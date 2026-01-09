@@ -1,10 +1,14 @@
 package flatfs_test
 
 import (
+	"bytes"
 	"context"
-	"os"
+	"fmt"
+	"io/fs"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/ipfs/go-datastore"
 	"github.com/ipfs/go-datastore/query"
@@ -16,18 +20,20 @@ func TestBatchWritesToTempUntilCommit(t *testing.T) {
 }
 
 func testBatchWritesToTempUntilCommit(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
-	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	ffs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
-	defer fs.Close()
+	defer ffs.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	// Create a batch
-	batch, err := fs.Batch(context.Background())
+	batch, err := ffs.Batch(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,15 +41,28 @@ func testBatchWritesToTempUntilCommit(dirFunc mkShardFunc, t *testing.T) {
 	// Put some keys
 	keys := []string{"QUUX", "QAAX", "QBBX"}
 	for _, key := range keys {
-		err = batch.Put(context.Background(), datastore.NewKey(key), []byte("testdata"))
+		err = batch.Put(ctx, datastore.NewKey(key), []byte("testdata"))
 		if err != nil {
 			t.Fatal(err)
 		}
 	}
 
+	// Calling the Batch.Has method waits for async writes to finish.
+	batchReader, ok := batch.(flatfs.BatchReader)
+	if !ok {
+		t.Fatal("batch does not implement BatchReader interface")
+	}
+	has, err := batchReader.Has(ctx, datastore.NewKey(keys[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("expected batch to have first key")
+	}
+
 	// Check that files don't exist in the main datastore yet
 	for _, key := range keys {
-		has, err := fs.Has(context.Background(), datastore.NewKey(key))
+		has, err := ffs.Has(ctx, datastore.NewKey(key))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -53,38 +72,33 @@ func testBatchWritesToTempUntilCommit(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// Check that no data files exist in shard directories
-	checkNoDataFiles := func() bool {
-		found := false
-		filepath.Walk(temp, func(path string, info os.FileInfo, err error) error {
-			if err != nil {
-				return err
+	err = filepath.WalkDir(temp, func(path string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if filepath.Ext(path) == ".data" {
+			relPath, _ := filepath.Rel(temp, path)
+			// Ignore if it's in .temp directory
+			if !isInTempDir(relPath) {
+				return fmt.Errorf("found data file before commit: %s", relPath)
 			}
-			if filepath.Ext(path) == ".data" {
-				relPath, _ := filepath.Rel(temp, path)
-				// Ignore if it's in .temp directory
-				if !isInTempDir(relPath) {
-					t.Errorf("found data file before commit: %s", relPath)
-					found = true
-				}
-			}
-			return nil
-		})
-		return found
-	}
+		}
+		return nil
+	})
 
-	if checkNoDataFiles() {
-		t.Fatal("data files found in main directories before commit")
+	if err != nil {
+		t.Fatal(err)
 	}
 
 	// Now commit
-	err = batch.Commit(context.Background())
+	err = batch.Commit(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// After commit, all keys should exist
 	for _, key := range keys {
-		has, err := fs.Has(context.Background(), datastore.NewKey(key))
+		has, err := ffs.Has(ctx, datastore.NewKey(key))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -104,26 +118,25 @@ func TestBatchReadOperations(t *testing.T) {
 }
 
 func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
-	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	ffs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
-	defer fs.Close()
+	defer ffs.Close()
 
 	// Put some initial data in the datastore
 	initialKey := datastore.NewKey("INITIAL")
 	initialData := []byte("initial data")
-	err = fs.Put(context.Background(), initialKey, initialData)
+	err = ffs.Put(context.Background(), initialKey, initialData)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Create a batch
-	batch, err := fs.Batch(context.Background())
+	batch, err := ffs.Batch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,7 +164,7 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 
 	// Delete a key that will be created
 	deleteKey := datastore.NewKey("TODELETE")
-	err = fs.Put(context.Background(), deleteKey, []byte("to be deleted"))
+	err = ffs.Put(context.Background(), deleteKey, []byte("to be deleted"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +242,7 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// Main datastore should still have original data
-	data, err = fs.Get(context.Background(), initialKey)
+	data, err = ffs.Get(context.Background(), initialKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -245,7 +258,7 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 
 	// Verify final state in main datastore
 	// 1. New key should exist
-	data, err = fs.Get(context.Background(), batchKey)
+	data, err = ffs.Get(context.Background(), batchKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +267,7 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// 2. Initial key should be overwritten
-	data, err = fs.Get(context.Background(), initialKey)
+	data, err = ffs.Get(context.Background(), initialKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,7 +276,7 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// 3. Deleted key should not exist
-	_, err = fs.Get(context.Background(), deleteKey)
+	_, err = ffs.Get(context.Background(), deleteKey)
 	if err != datastore.ErrNotFound {
 		t.Errorf("expected ErrNotFound for deleted key after commit, got %v", err)
 	}
@@ -274,18 +287,17 @@ func TestBatchDiscard(t *testing.T) {
 }
 
 func testBatchDiscard(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
-	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	ffs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("New fail: %v\n", err)
 	}
-	defer fs.Close()
+	defer ffs.Close()
 
 	// Create a batch
-	batch, err := fs.Batch(context.Background())
+	batch, err := ffs.Batch(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -313,7 +325,7 @@ func testBatchDiscard(dirFunc mkShardFunc, t *testing.T) {
 
 	// Check that files still don't exist in the main datastore
 	for _, key := range keys {
-		has, err := fs.Has(context.Background(), datastore.NewKey(key))
+		has, err := ffs.Has(context.Background(), datastore.NewKey(key))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -337,29 +349,28 @@ func TestBatchQuery(t *testing.T) {
 }
 
 func testBatchQuery(dirFunc mkShardFunc, t *testing.T) {
-	temp, cleanup := tempdir(t)
-	defer cleanup()
+	temp := t.TempDir()
 	defer checkTemp(t, temp)
 
-	fs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
+	ffs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
 		t.Fatalf("CreateOrOpen fail: %v\n", err)
 	}
-	defer fs.Close()
+	defer ffs.Close()
 
 	ctx := context.Background()
 
 	// Add some data to the main datastore
 	mainKeys := []string{"EXISTING1", "EXISTING2", "EXISTING3"}
 	for _, k := range mainKeys {
-		err := fs.Put(ctx, datastore.NewKey(k), []byte("main:"+k))
+		err := ffs.Put(ctx, datastore.NewKey(k), []byte("main:"+k))
 		if err != nil {
 			t.Fatalf("Put fail: %v\n", err)
 		}
 	}
 
 	// Create a batch
-	batch, err := fs.Batch(ctx)
+	batch, err := ffs.Batch(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -478,7 +489,7 @@ func testBatchQuery(dirFunc mkShardFunc, t *testing.T) {
 
 	// Query main datastore - should see committed changes
 	q = query.Query{}
-	results, err = fs.Query(ctx, q)
+	results, err = ffs.Query(ctx, q)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -513,7 +524,7 @@ func testBatchQuery(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// Verify /EXISTING2 was deleted
-	has, err := fs.Has(ctx, datastore.NewKey("EXISTING2"))
+	has, err := ffs.Has(ctx, datastore.NewKey("EXISTING2"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -529,4 +540,125 @@ func collectQueryResults(t *testing.T, results query.Results) []query.Entry {
 		t.Fatalf("query result error: %v", err)
 	}
 	return entries
+}
+
+func TestConcurrentDuplicateBatchWrites(t *testing.T) {
+	const (
+		numKeys     = 500
+		concurrency = 8
+	)
+
+	temp := t.TempDir()
+	defer checkTemp(t, temp)
+
+	ffs, err := flatfs.CreateOrOpen(temp, flatfs.Suffix(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+	defer ffs.Close()
+
+	// Create a batch
+	batch, err := ffs.Batch(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Put some keys
+	keys := make([]string, 0, numKeys)
+	for i := range cap(keys) {
+		keys = append(keys, fmt.Sprintf("Q%03d", i))
+	}
+
+	start := make(chan struct{})
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	fileData := bytes.Repeat([]byte("testdata"), 256)
+	var wgDone, wgReady sync.WaitGroup
+	wgDone.Add(concurrency)
+	wgReady.Add(concurrency)
+
+	for range concurrency {
+		go func() {
+			defer wgDone.Done()
+			wgReady.Done()
+			<-start
+			for _, key := range keys {
+				if err := batch.Put(ctx, datastore.NewKey(key), fileData); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}()
+	}
+
+	wgReady.Wait()
+	close(start)
+
+	wgDone.Wait()
+	if ctx.Err() != nil {
+		t.Fatal("concurrent batch write did not complete")
+	}
+
+	// Calling the Batch.Has method waits for async writes to finish.
+	batchReader, ok := batch.(flatfs.BatchReader)
+	if !ok {
+		t.Fatal("batch does not implement BatchReader interface")
+	}
+	has, err := batchReader.Has(ctx, datastore.NewKey(keys[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !has {
+		t.Fatal("expected batch to have first key")
+	}
+
+	// Check that files don't exist in the main datastore yet
+	for _, key := range keys {
+		has, err := ffs.Has(context.Background(), datastore.NewKey(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if has {
+			t.Errorf("key %s should not exist in datastore before commit", key)
+		}
+	}
+
+	var tempCount int
+	err = filepath.WalkDir(temp, func(path string, _ fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if filepath.Ext(path) == ".data" {
+			relPath, _ := filepath.Rel(temp, path)
+			if isInTempDir(relPath) {
+				tempCount++
+			}
+		}
+		return nil
+	})
+
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if tempCount != len(keys) {
+		t.Fatalf("wrong number of temp files, expected %d, got %d", len(keys), tempCount)
+	}
+
+	// Now commit
+	err = batch.Commit(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// After commit, all keys should exist
+	for _, key := range keys {
+		has, err := ffs.Has(context.Background(), datastore.NewKey(key))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !has {
+			t.Errorf("key %s should exist in datastore after commit", key)
+		}
+	}
 }
