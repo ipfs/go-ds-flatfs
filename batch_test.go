@@ -580,6 +580,7 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 	fileData := bytes.Repeat([]byte("testdata"), 256)
 
 	start := make(chan struct{})
+	errs := make(chan error, len(batches))
 	var wgDone, wgReady sync.WaitGroup
 
 	for _, batch := range batches {
@@ -592,7 +593,8 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 				<-start
 				for _, key := range keys {
 					if err := batch.Put(ctx, datastore.NewKey(key), fileData); err != nil {
-						t.Fatal(err)
+						errs <- err
+						return
 					}
 				}
 			}()
@@ -602,6 +604,10 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 	wgReady.Wait() // wait for all goroutines to be ready
 	close(start)   // run all goroutines
 	wgDone.Wait()  // wait for all goroutines to finish
+	close(errs)
+	for err = range errs {
+		t.Error(err)
+	}
 
 	if ctx.Err() != nil {
 		t.Fatal("concurrent batch write did not complete")
@@ -659,6 +665,7 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 
 	// Now commit concurrently.
 	start = make(chan struct{})
+	errs = make(chan error, len(batches))
 	wgDone.Add(len(batches))
 	wgReady.Add(len(batches))
 	for _, batch := range batches {
@@ -668,7 +675,7 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 			defer wgDone.Done()
 			err := batch.Commit(ctx)
 			if err != nil {
-				t.Fatal(err)
+				errs <- err
 			}
 		}()
 	}
@@ -676,6 +683,10 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 	wgReady.Wait() // wait for all goroutines to be ready
 	close(start)   // run all goroutines
 	wgDone.Wait()  // wait for all goroutines to finish
+	close(errs)
+	for err = range errs {
+		t.Error(err)
+	}
 
 	// After commit, all keys should exist and have correct data.
 	for _, key := range keys {
