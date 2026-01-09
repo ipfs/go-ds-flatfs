@@ -544,8 +544,9 @@ func collectQueryResults(t *testing.T, results query.Results) []query.Entry {
 
 func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 	const (
-		numKeys     = 500
 		concurrency = 8
+		numBatches  = 4
+		numKeys     = 500
 	)
 
 	temp := t.TempDir()
@@ -557,64 +558,73 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 	}
 	defer ffs.Close()
 
-	// Create a batch
-	batch, err := ffs.Batch(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+
+	batches := make([]datastore.Batch, 0, numBatches)
+	for range cap(batches) {
+		// Create a batch
+		batch, err := ffs.Batch(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		batches = append(batches, batch)
 	}
 
-	// Put some keys
+	// Create keys
 	keys := make([]string, 0, numKeys)
 	for i := range cap(keys) {
 		keys = append(keys, fmt.Sprintf("Q%03d", i))
 	}
+	// Create file content
+	fileData := bytes.Repeat([]byte("testdata"), 256)
 
 	start := make(chan struct{})
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-
-	fileData := bytes.Repeat([]byte("testdata"), 256)
 	var wgDone, wgReady sync.WaitGroup
-	wgDone.Add(concurrency)
-	wgReady.Add(concurrency)
 
-	for range concurrency {
-		go func() {
-			defer wgDone.Done()
-			wgReady.Done()
-			<-start
-			for _, key := range keys {
-				if err := batch.Put(ctx, datastore.NewKey(key), fileData); err != nil {
-					t.Fatal(err)
+	for _, batch := range batches {
+		wgDone.Add(concurrency)
+		wgReady.Add(concurrency)
+		for range concurrency {
+			go func() {
+				defer wgDone.Done()
+				wgReady.Done()
+				<-start
+				for _, key := range keys {
+					if err := batch.Put(ctx, datastore.NewKey(key), fileData); err != nil {
+						t.Fatal(err)
+					}
 				}
-			}
-		}()
+			}()
+		}
 	}
 
-	wgReady.Wait()
-	close(start)
+	wgReady.Wait() // wait for all goroutines to be ready
+	close(start)   // run all goroutines
+	wgDone.Wait()  // wait for all goroutines to finish
 
-	wgDone.Wait()
 	if ctx.Err() != nil {
 		t.Fatal("concurrent batch write did not complete")
 	}
 
-	// Calling the Batch.Has method waits for async writes to finish.
-	batchReader, ok := batch.(flatfs.BatchReader)
-	if !ok {
-		t.Fatal("batch does not implement BatchReader interface")
-	}
-	has, err := batchReader.Has(ctx, datastore.NewKey(keys[0]))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !has {
-		t.Fatal("expected batch to have first key")
+	for _, batch := range batches {
+		// Calling the Batch.Has method waits for async writes to finish.
+		batchReader, ok := batch.(flatfs.BatchReader)
+		if !ok {
+			t.Fatal("batch does not implement BatchReader interface")
+		}
+		has, err := batchReader.Has(ctx, datastore.NewKey(keys[0]))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !has {
+			t.Fatal("expected batch to have first key")
+		}
 	}
 
 	// Check that files don't exist in the main datastore yet
 	for _, key := range keys {
-		has, err := ffs.Has(context.Background(), datastore.NewKey(key))
+		has, err := ffs.Has(ctx, datastore.NewKey(key))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -641,24 +651,40 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if tempCount != len(keys) {
-		t.Fatalf("wrong number of temp files, expected %d, got %d", len(keys), tempCount)
+	// Check that there are the correct count for all batches.
+	expectCount := len(batches) * len(keys)
+	if tempCount != expectCount {
+		t.Fatalf("wrong number of temp files, expected %d, got %d", expectCount, tempCount)
 	}
 
-	// Now commit
-	err = batch.Commit(context.Background())
-	if err != nil {
-		t.Fatal(err)
+	// Now commit concurrently.
+	start = make(chan struct{})
+	wgDone.Add(len(batches))
+	wgReady.Add(len(batches))
+	for _, batch := range batches {
+		go func() {
+			wgReady.Done()
+			<-start
+			defer wgDone.Done()
+			err := batch.Commit(context.Background())
+			if err != nil {
+				t.Fatal(err)
+			}
+		}()
 	}
 
-	// After commit, all keys should exist
+	wgReady.Wait() // wait for all goroutines to be ready
+	close(start)   // run all goroutines
+	wgDone.Wait()  // wait for all goroutines to finish
+
+	// After commit, all keys should exist and have correct data.
 	for _, key := range keys {
-		has, err := ffs.Has(context.Background(), datastore.NewKey(key))
+		val, err := ffs.Get(ctx, datastore.NewKey(key))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !has {
-			t.Errorf("key %s should exist in datastore after commit", key)
+		if !bytes.Equal(val, fileData) {
+			t.Errorf("bad data for key %s", key)
 		}
 	}
 }
