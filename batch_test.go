@@ -544,9 +544,9 @@ func collectQueryResults(t *testing.T, results query.Results) []query.Entry {
 
 func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 	const (
-		concurrency = 8
-		numBatches  = 4
-		numKeys     = 500
+		numBatches = 4   // number of concurrent batches
+		numKeys    = 500 // number of keys to write, same for each batch
+		numWriters = 8   // duplicate writers per batch
 	)
 
 	temp := t.TempDir()
@@ -583,9 +583,9 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 	var wgDone, wgReady sync.WaitGroup
 
 	for _, batch := range batches {
-		wgDone.Add(concurrency)
-		wgReady.Add(concurrency)
-		for range concurrency {
+		wgDone.Add(numWriters)
+		wgReady.Add(numWriters)
+		for range numWriters {
 			go func() {
 				defer wgDone.Done()
 				wgReady.Done()
@@ -666,7 +666,7 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 			wgReady.Done()
 			<-start
 			defer wgDone.Done()
-			err := batch.Commit(context.Background())
+			err := batch.Commit(ctx)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -686,5 +686,10 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 		if !bytes.Equal(val, fileData) {
 			t.Errorf("bad data for key %s", key)
 		}
+	}
+
+	// Make sure no timeouts happened.
+	if ctx.Err() != nil {
+		t.Fatal("timed out writing batches")
 	}
 }
