@@ -1,6 +1,15 @@
 // Package flatfs is a Datastore implementation that stores all
 // objects in a two-level directory structure in the local file
 // system, regardless of the hierarchy of the keys.
+//
+// This is a special-purpose datastore designed exclusively for content-addressed
+// storage (CID:block pairs). It assumes keys are derived from cryptographic hashes
+// of values, meaning the same key always maps to the same value.
+//
+// Write semantics: flatfs uses "first-successful-writer-wins" for concurrent or
+// duplicate writes to the same key. This is safe for content-addressed data where
+// identical keys guarantee identical values. For mutable data requiring
+// last-writer-wins semantics, use go-ds-leveldb or go-ds-pebble instead.
 package flatfs
 
 import (
@@ -1124,6 +1133,12 @@ type BatchReader interface {
 //   - Commit atomically renames all files to their sharded destinations
 //   - On crash/discard, temp directory is cleaned (no partial writes)
 //
+// Duplicate key handling: Uses "first-successful-writer-wins" semantics.
+// If the same key is Put multiple times within a batch, only the first Put
+// is written; subsequent Puts to that key are silently skipped. This is safe
+// for content-addressed storage where identical keys guarantee identical values.
+// For mutable data requiring last-writer-wins, use a different datastore.
+//
 // Concurrency: Safe for concurrent calls to Put/Delete/Get/Has/GetSize/Query.
 // Not safe to call Commit or Discard concurrently with other operations.
 //
@@ -1172,6 +1187,10 @@ func (fs *Datastore) Batch(_ context.Context) (datastore.Batch, error) {
 }
 
 // Put writes val for key to a temporary file asynchronously and returns immediately.
+//
+// Duplicate keys: If this key was already Put in this batch, the call returns
+// immediately without writing (first-successful-writer-wins). This is safe for
+// content-addressed data where identical keys have identical values.
 //
 // CRITICAL: The caller MUST NOT modify or reuse the val byte slice after calling Put.
 // The buffer is used asynchronously by a background goroutine. Violating this will
