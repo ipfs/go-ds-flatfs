@@ -1152,6 +1152,9 @@ type BatchReader interface {
 //   - Commit: O(n) file renames, where n = number of Put operations
 //
 // IMPORTANT: Batch instances should not be reused after Commit or Discard.
+// This follows the go-datastore Batch interface contract which states that
+// calling Put/Delete after Commit/Discard has undefined behavior.
+// See: https://github.com/ipfs/go-datastore/blob/master/datastore.go
 type flatfsBatch struct {
 	mu      sync.Mutex
 	puts    []datastore.Key            // ordered list for iteration (Commit, Query)
@@ -1253,15 +1256,10 @@ func (bt *flatfsBatch) Put(ctx context.Context, key datastore.Key, val []byte) e
 			<-bt.asyncPutGate
 		}()
 
-		// Ensure temp directory exists (recreate if batch was reused after commit)
-		tempDirPath := filepath.Dir(tempFile)
-		if _, err := os.Stat(tempDirPath); errors.Is(err, fs.ErrNotExist) {
-			if err := os.Mkdir(tempDirPath, 0755); err != nil && !os.IsExist(err) {
-				bt.setAsyncError(fmt.Errorf("failed to recreate temp directory: %w", err))
-				return
-			}
-		} else if err != nil {
-			bt.setAsyncError(fmt.Errorf("failed to stat temp directory: %w", err))
+		// Ensure temp directory exists (recreate if batch was reused after commit,
+		// which is unsupported but we handle it as a precaution)
+		if err := os.MkdirAll(filepath.Dir(tempFile), 0755); err != nil {
+			bt.setAsyncError(fmt.Errorf("failed to create temp directory: %w", err))
 			return
 		}
 
@@ -1554,7 +1552,8 @@ func (bt *flatfsBatch) Query(ctx context.Context, q query.Query) (query.Results,
 	return query.NaiveQueryApply(q, results), nil
 }
 
-// Discard discards the batch operations without committing
+// Discard discards the batch operations without committing.
+// The batch should not be reused after Discard is called.
 func (bt *flatfsBatch) Discard(ctx context.Context) error {
 	// Wait for any pending async writes to complete
 	bt.asyncWrites.Wait()
@@ -1562,8 +1561,12 @@ func (bt *flatfsBatch) Discard(ctx context.Context) error {
 	bt.mu.Lock()
 	defer bt.mu.Unlock()
 
-	// Remove the batch temp directory and all subdirectories
-	_ = os.RemoveAll(bt.tempDir)
+	// Remove the batch temp directory and all its contents
+	if err := os.RemoveAll(bt.tempDir); err != nil {
+		log.Warnw("failed to remove batch temp directory on discard", "error", err, "path", bt.tempDir)
+	}
+
+	// Reset state as a precaution (batch should not be reused per go-datastore contract)
 	bt.puts = nil
 	bt.putSet = make(map[datastore.Key]struct{})
 	bt.asyncFirstError = nil
@@ -1661,13 +1664,15 @@ func (bt *flatfsBatch) Commit(ctx context.Context) error {
 		}
 	}
 
-	// Reset state after successful commit so batch can be reused
+	// Reset state as a precaution (batch should not be reused per go-datastore contract)
 	bt.puts = nil
 	bt.putSet = make(map[datastore.Key]struct{})
 	bt.deletes = make(map[datastore.Key]struct{})
 
 	// Clean up the batch temp directory after successful commit
-	os.RemoveAll(bt.tempDir)
+	if err := os.RemoveAll(bt.tempDir); err != nil {
+		log.Warnw("failed to remove batch temp directory after commit", "error", err, "path", bt.tempDir)
+	}
 
 	return nil
 }
