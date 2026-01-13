@@ -4,8 +4,8 @@ go 1.24
 
 require (
 	github.com/alexbrainman/goissue34681 v0.0.0-20191006012335-3fc7a47baff5
-	github.com/ipfs/go-datastore v0.8.3
-	github.com/ipfs/go-log/v2 v2.8.1
+	github.com/ipfs/go-datastore v0.9.0
+	github.com/ipfs/go-log/v2 v2.9.0
 )
 
 require (
