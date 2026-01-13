@@ -39,6 +39,32 @@ functionality.
 
 ### Restrictions
 
+FlatFS is a special-purpose datastore designed exclusively for content-addressed
+storage (CID:block pairs). It is **not** a general-purpose key-value store.
+
+#### Content-Addressed Storage Only
+
+This datastore assumes that keys are content identifiers (CIDs) where the key
+is derived from a cryptographic hash of the value. This means:
+
+- The same key always maps to the same value (values are deterministic)
+- Multiple writes to the same key are idempotent (writing the same data twice is safe)
+
+**Write semantics**: When multiple writes target the same key (concurrently or
+within a batch), flatfs uses "first-successful-writer-wins" semantics. The first
+write to complete is persisted; subsequent writes to the same key are silently
+skipped. This is safe for content-addressed data because identical keys
+guarantee identical values.
+
+**If you need different semantics**: For data where the same key may have
+different values over time (e.g., mutable metadata, counters, queues), use a
+different datastore implementation such as
+[go-ds-leveldb](https://github.com/ipfs/go-ds-leveldb) or
+[go-ds-pebble](https://github.com/ipfs/go-ds-pebble), which provide
+last-writer-wins semantics.
+
+#### Key Format
+
 FlatFS keys are severely restricted. Only keys that match `/[0-9A-Z+-_=]\+` are
 allowed. That is, keys may only contain upper-case alpha-numeric characters,
 '-', '+', '_', and '='. This is because values are written directly to the
