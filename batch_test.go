@@ -344,6 +344,135 @@ func testBatchDiscard(dirFunc mkShardFunc, t *testing.T) {
 	}
 }
 
+func TestBatchPutDeleteSameKey(t *testing.T) {
+	temp := t.TempDir()
+	ctx := t.Context()
+
+	ffs, err := flatfs.CreateOrOpen(temp, flatfs.Prefix(2), false)
+	if err != nil {
+		t.Fatalf("New fail: %v\n", err)
+	}
+	defer ffs.Close()
+
+	// Put some initial data in the datastore
+	keyA := datastore.NewKey("KEYA")
+	dataA := []byte("dataA")
+	err = ffs.Put(ctx, keyA, dataA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	keyB := datastore.NewKey("KEYB")
+	dataB := []byte("dataB")
+	err = ffs.Put(ctx, keyB, dataB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a batch
+	batch, err := ffs.Batch(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that last operation wins: Delete, Put
+	err = batch.Delete(ctx, keyA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	overwriteA := []byte("data-A-overwrite")
+	err = batch.Put(ctx, keyA, overwriteA)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that last operation wins: Put, Delete
+	overwriteB := []byte("data-B-overwrite")
+	err = batch.Put(ctx, keyB, overwriteB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = batch.Delete(ctx, keyB)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that last operation wins: Put, Delete, Put
+	keyX := datastore.NewKey("KEYX")
+	dataX1 := []byte("data-X-1")
+	err = batch.Put(ctx, keyX, dataX1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = batch.Delete(ctx, keyX)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dataX2 := []byte("data-X-2")
+	err = batch.Put(ctx, keyX, dataX2)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Check that last operation wins: Put, Delete, Put, Delete
+	keyY := datastore.NewKey("KEYY")
+	dataY1 := []byte("data-Y-1")
+	err = batch.Put(ctx, keyX, dataY1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = batch.Delete(ctx, keyY)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = batch.Put(ctx, keyY, dataY1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = batch.Delete(ctx, keyY)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Commit the batch
+	err = batch.Commit(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify final state in main datastore.
+
+	// keyA should exist and be overwritten.
+	data, err := ffs.Get(ctx, keyA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(overwriteA) {
+		t.Errorf("expected %s, got %s", overwriteA, data)
+	}
+
+	// keyB should be deleted.
+	_, err = ffs.Get(ctx, keyB)
+	if err != datastore.ErrNotFound {
+		t.Errorf("expected ErrNotFound for deleted keyB after commit, got %v", err)
+	}
+
+	// keyX should be added with initial value.
+	data, err = ffs.Get(ctx, keyX)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != string(dataX1) {
+		t.Errorf("expected %s, got %s", dataX1, data)
+	}
+
+	// keyY should not exist
+	_, err = ffs.Get(ctx, keyY)
+	if err != datastore.ErrNotFound {
+		t.Errorf("expected ErrNotFound for keyY after commit, got %v", err)
+	}
+}
+
 func TestBatchQuery(t *testing.T) {
 	tryAllShardFuncs(t, testBatchQuery)
 }
