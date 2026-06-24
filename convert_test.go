@@ -196,17 +196,18 @@ func populateDatastore(t *testing.T, dir string) ([]datastore.Key, [][]byte) {
 	}
 	defer ds.Close()
 
+	ctx := t.Context()
 	r := rand.New(rand.NewSource(time.Now().UnixNano()))
 	var blocks [][]byte
 	var keys []datastore.Key
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		blk := make([]byte, 1000)
 		r.Read(blk)
 		blocks = append(blocks, blk)
 
 		key := "X" + base32.StdEncoding.EncodeToString(blk[:8])
 		keys = append(keys, datastore.NewKey(key))
-		err := ds.Put(bg, keys[i], blocks[i])
+		err := ds.Put(ctx, keys[i], blocks[i])
 		if err != nil {
 			t.Fatalf("Put fail: %v\n", err)
 		}
@@ -222,8 +223,9 @@ func checkKeys(t *testing.T, dir string, keys []datastore.Key, blocks [][]byte) 
 	}
 	defer ds.Close()
 
+	ctx := t.Context()
 	for i, key := range keys {
-		data, err := ds.Get(bg, key)
+		data, err := ds.Get(ctx, key)
 		if err != nil {
 			t.Fatalf("Get fail: %v\n", err)
 		}
