@@ -417,7 +417,7 @@ func TestBatchPutDeleteSameKey(t *testing.T) {
 	// Check that last operation wins: Put, Delete, Put, Delete
 	keyY := datastore.NewKey("KEYY")
 	dataY1 := []byte("data-Y-1")
-	err = batch.Put(ctx, keyX, dataY1)
+	err = batch.Put(ctx, keyY, dataY1)
 	if err != nil {
 		t.Fatal(err)
 	}
