@@ -7,7 +7,17 @@ import (
 )
 
 func tempFileOnce(dir, pattern string) (*os.File, error) {
-	return os.CreateTemp(dir, pattern)
+	f, err := os.CreateTemp(dir, pattern)
+	if err != nil {
+		return nil, err
+	}
+	// os.CreateTemp hardcodes 0600; relax to 0666 so umask controls final permissions
+	if err := f.Chmod(0666); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		return nil, err
+	}
+	return f, nil
 }
 
 func readFileOnce(filename string) ([]byte, error) {
