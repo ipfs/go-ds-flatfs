@@ -21,7 +21,6 @@ func TestBatchWritesToTempUntilCommit(t *testing.T) {
 
 func testBatchWritesToTempUntilCommit(dirFunc mkShardFunc, t *testing.T) {
 	temp := t.TempDir()
-	defer checkTemp(t, temp)
 
 	ffs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
@@ -29,7 +28,7 @@ func testBatchWritesToTempUntilCommit(dirFunc mkShardFunc, t *testing.T) {
 	}
 	defer ffs.Close()
 
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
 	// Create a batch
@@ -119,7 +118,7 @@ func TestBatchReadOperations(t *testing.T) {
 
 func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	temp := t.TempDir()
-	defer checkTemp(t, temp)
+	ctx := t.Context()
 
 	ffs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
@@ -130,13 +129,13 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	// Put some initial data in the datastore
 	initialKey := datastore.NewKey("INITIAL")
 	initialData := []byte("initial data")
-	err = ffs.Put(context.Background(), initialKey, initialData)
+	err = ffs.Put(ctx, initialKey, initialData)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Create a batch
-	batch, err := ffs.Batch(context.Background())
+	batch, err := ffs.Batch(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,32 +149,32 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	// Put a new key in batch
 	batchKey := datastore.NewKey("BATCH")
 	batchData := []byte("batch data")
-	err = batch.Put(context.Background(), batchKey, batchData)
+	err = batch.Put(ctx, batchKey, batchData)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Overwrite initial key in batch
 	overwriteData := []byte("overwritten data")
-	err = batch.Put(context.Background(), initialKey, overwriteData)
+	err = batch.Put(ctx, initialKey, overwriteData)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Delete a key that will be created
 	deleteKey := datastore.NewKey("TODELETE")
-	err = ffs.Put(context.Background(), deleteKey, []byte("to be deleted"))
+	err = ffs.Put(ctx, deleteKey, []byte("to be deleted"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = batch.Delete(context.Background(), deleteKey)
+	err = batch.Delete(ctx, deleteKey)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Test Get operations before commit
 	// 1. Get from batch (new key)
-	data, err := batchReader.Get(context.Background(), batchKey)
+	data, err := batchReader.Get(ctx, batchKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +183,7 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// 2. Get overwritten key should return new data from batch
-	data, err = batchReader.Get(context.Background(), initialKey)
+	data, err = batchReader.Get(ctx, initialKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,14 +192,14 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// 3. Get deleted key should return not found
-	_, err = batchReader.Get(context.Background(), deleteKey)
+	_, err = batchReader.Get(ctx, deleteKey)
 	if err != datastore.ErrNotFound {
 		t.Errorf("expected ErrNotFound for deleted key, got %v", err)
 	}
 
 	// Test Has operations before commit
 	// 1. Has for new key in batch
-	has, err := batchReader.Has(context.Background(), batchKey)
+	has, err := batchReader.Has(ctx, batchKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +208,7 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// 2. Has for overwritten key
-	has, err = batchReader.Has(context.Background(), initialKey)
+	has, err = batchReader.Has(ctx, initialKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -218,7 +217,7 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// 3. Has for deleted key should return false
-	has, err = batchReader.Has(context.Background(), deleteKey)
+	has, err = batchReader.Has(ctx, deleteKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +226,7 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// Test GetSize operations before commit
-	size, err := batchReader.GetSize(context.Background(), batchKey)
+	size, err := batchReader.GetSize(ctx, batchKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -236,13 +235,13 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// GetSize for deleted key should return not found
-	_, err = batchReader.GetSize(context.Background(), deleteKey)
+	_, err = batchReader.GetSize(ctx, deleteKey)
 	if err != datastore.ErrNotFound {
 		t.Errorf("expected ErrNotFound for deleted key size, got %v", err)
 	}
 
 	// Main datastore should still have original data
-	data, err = ffs.Get(context.Background(), initialKey)
+	data, err = ffs.Get(ctx, initialKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -251,14 +250,14 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// Commit the batch
-	err = batch.Commit(context.Background())
+	err = batch.Commit(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Verify final state in main datastore
 	// 1. New key should exist
-	data, err = ffs.Get(context.Background(), batchKey)
+	data, err = ffs.Get(ctx, batchKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +266,7 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// 2. Initial key should be overwritten
-	data, err = ffs.Get(context.Background(), initialKey)
+	data, err = ffs.Get(ctx, initialKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -276,7 +275,7 @@ func testBatchReadOperations(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// 3. Deleted key should not exist
-	_, err = ffs.Get(context.Background(), deleteKey)
+	_, err = ffs.Get(ctx, deleteKey)
 	if err != datastore.ErrNotFound {
 		t.Errorf("expected ErrNotFound for deleted key after commit, got %v", err)
 	}
@@ -288,7 +287,7 @@ func TestBatchDiscard(t *testing.T) {
 
 func testBatchDiscard(dirFunc mkShardFunc, t *testing.T) {
 	temp := t.TempDir()
-	defer checkTemp(t, temp)
+	ctx := t.Context()
 
 	ffs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
@@ -297,7 +296,7 @@ func testBatchDiscard(dirFunc mkShardFunc, t *testing.T) {
 	defer ffs.Close()
 
 	// Create a batch
-	batch, err := ffs.Batch(context.Background())
+	batch, err := ffs.Batch(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -305,7 +304,7 @@ func testBatchDiscard(dirFunc mkShardFunc, t *testing.T) {
 	// Put some keys
 	keys := []string{"QUUX", "QAAX", "QBBX"}
 	for _, key := range keys {
-		err = batch.Put(context.Background(), datastore.NewKey(key), []byte("testdata"))
+		err = batch.Put(ctx, datastore.NewKey(key), []byte("testdata"))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -318,14 +317,14 @@ func testBatchDiscard(dirFunc mkShardFunc, t *testing.T) {
 	}
 
 	// Discard the batch
-	err = discardable.Discard(context.Background())
+	err = discardable.Discard(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Check that files still don't exist in the main datastore
 	for _, key := range keys {
-		has, err := ffs.Has(context.Background(), datastore.NewKey(key))
+		has, err := ffs.Has(ctx, datastore.NewKey(key))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -479,7 +478,6 @@ func TestBatchQuery(t *testing.T) {
 
 func testBatchQuery(dirFunc mkShardFunc, t *testing.T) {
 	temp := t.TempDir()
-	defer checkTemp(t, temp)
 
 	ffs, err := flatfs.CreateOrOpen(temp, dirFunc(2), false)
 	if err != nil {
@@ -487,7 +485,7 @@ func testBatchQuery(dirFunc mkShardFunc, t *testing.T) {
 	}
 	defer ffs.Close()
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Add some data to the main datastore
 	mainKeys := []string{"EXISTING1", "EXISTING2", "EXISTING3"}
@@ -679,7 +677,6 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 	)
 
 	temp := t.TempDir()
-	defer checkTemp(t, temp)
 
 	ffs, err := flatfs.CreateOrOpen(temp, flatfs.Suffix(2), false)
 	if err != nil {
@@ -687,7 +684,7 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 	}
 	defer ffs.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 	defer cancel()
 
 	batches := make([]datastore.Batch, 0, numBatches)
@@ -795,18 +792,16 @@ func TestConcurrentDuplicateBatchWrites(t *testing.T) {
 	// Now commit concurrently.
 	start = make(chan struct{})
 	errs = make(chan error, len(batches))
-	wgDone.Add(len(batches))
 	wgReady.Add(len(batches))
 	for _, batch := range batches {
-		go func() {
+		wgDone.Go(func() {
 			wgReady.Done()
 			<-start
-			defer wgDone.Done()
 			err := batch.Commit(ctx)
 			if err != nil {
 				errs <- err
 			}
-		}()
+		})
 	}
 
 	wgReady.Wait() // wait for all goroutines to be ready
